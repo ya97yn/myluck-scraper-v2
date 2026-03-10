@@ -34,7 +34,7 @@ def initialize_firebase():
 
 def get_2d_set():
     try:
-        url = "https://www.set.or.th/api/set/index/set/market-stat"
+        url = "https://www.set.or.th/api/set/market/index/SET/overview"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
             'Referer': 'https://www.set.or.th/en/home'
@@ -52,7 +52,7 @@ def get_2d_set():
 
 def get_3d_glo():
     try:
-        url = "https://www.glo.or.th/home-page"
+        url = "https://thai-lotto.net"
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
         # Selector အသစ်များဖြင့် ကြိုးစားရှာဖွေခြင်း
