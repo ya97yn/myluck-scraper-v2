@@ -10,6 +10,7 @@ from firebase_admin import credentials, db
 import http.server
 import socketserver
 
+# Render Logs မှာ ချက်ချင်းမြင်ရစေရန်
 os.environ['PYTHONUNBUFFERED'] = "1"
 bkk_tz = pytz.timezone('Asia/Bangkok')
 
@@ -24,82 +25,93 @@ def initialize_firebase():
             firebase_admin.initialize_app(cred, {
                 'databaseURL': 'https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app/'
             })
-            print(">>> Firebase: Connected via API Access")
+            print(">>> Firebase: Connected Successfully")
             return True
         except Exception as e:
             print(f">>> Firebase Init Error: {e}")
             return False
     return True
 
-def get_2d_via_api():
-    """ SET Official API ကို တိုက်ရိုက်ခေါ်ယူခြင်း """
+def get_2d_data():
+    """ SET API (List Index) မှ 2D ဒေတာကို ထုတ်ယူခြင်း """
     try:
-        # ဤ URL သည် SET Website က ဒေတာပြရန် သုံးသော Backend API ဖြစ်သည်
-        url = "https://www.set.or.th/api/set/index/set/market-stat"
-        headers = {
-            'User-Agent': 'Mozilla/5.0',
-            'Referer': 'https://www.set.or.th/en/home'
-        }
+        url = "https://www.set.or.th/api/set/index/info/list?type=INDEX"
+        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.set.or.th/en/home'}
         res = requests.get(url, headers=headers, timeout=15)
         if res.status_code == 200:
-            d = res.json()
-            idx = "{:.2f}".format(d.get('last', 0))
-            val = "{:.2f}".format(d.get('value', 0))
-            res_2d = idx[-1] + val.split('.')[0][-1]
-            return {"live_set": idx, "live_value": val, "main_result": res_2d}
+            data = res.json()
+            # SET Index ကို ရှာဖွေခြင်း (ပုံမှန်အားဖြင့် index 0 တွင် ရှိတတ်သည်)
+            set_index_info = next((item for item in data if item.get('symbol') == 'SET'), None)
+            
+            if set_index_info:
+                idx = "{:.2f}".format(set_index_info.get('last', 0))
+                val = "{:.2f}".format(set_index_info.get('value', 0))
+                # 2D တွက်နည်း (SET နောက်ဆုံးဂဏန်း + Value အစက်ရှေ့ နောက်ဆုံးဂဏန်း)
+                res_2d = idx[-1] + val.split('.')[0][-1]
+                return {"live_set": idx, "live_value": val, "main_result": res_2d}
     except Exception as e:
         print(f">>> SET API Error: {e}")
-    return {"live_set": "Market Closed", "live_value": "Market Closed", "main_result": "--"}
+    return {"live_set": "Waiting", "live_value": "Waiting", "main_result": "--"}
 
-def get_3d_via_api():
-    """ GLO Official API ကို တိုက်ရိုက်ခေါ်ယူခြင်း """
+def get_3d_data():
+    """ GLO API မှ နောက်ဆုံးထွက် 3D ဒေတာကို ယူခြင်း """
     try:
-        # GLO ၏ နောက်ဆုံးထွက် ထီဒေတာများကို ပေးသော API Endpoint
-        url = "https://www.glo.or.th/api/lottery/get_last_lottery"
+        url = "https://www.glo.or.th/api/lottery/getLatestLottery"
         res = requests.get(url, timeout=15)
         if res.status_code == 200:
             data = res.json()
-            # API response structure ပေါ်မူတည်၍ ဒေတာထုတ်ယူခြင်း
-            # မှတ်ချက် - GLO API သည် များသောအားဖြင့် JSON object ပြန်ပေးသည်
-            result_data = data.get('response', {})
-            p1 = result_data.get('prize1', "000000")
-            dt = result_data.get('display_date', datetime.now(bkk_tz).strftime("%Y-%m-%d"))
+            # GLO API structure အရ ဒေတာထုတ်ယူခြင်း
+            result = data.get('response', {})
+            p1 = result.get('prize1', {}).get('number', "000000")
+            dt = result.get('date', datetime.now(bkk_tz).strftime("%Y-%m-%d"))
             
             return {"date": dt, "prize_first": p1, "result": p1[-3:]}
     except Exception as e:
         print(f">>> GLO API Error: {e}")
-    return {"date": "Searching", "prize_first": "Waiting", "result": "---"}
+    return None
 
 def main_worker():
-    print(">>> API Worker Active. Fetching Real-time Data...")
+    print(">>> API Scraper Worker Started...")
     while True:
         try:
             now = datetime.now(bkk_tz)
             
-            # 2D API Sync
-            data_2d = get_2d_via_api()
+            # 1. 2D Update
+            data_2d = get_2d_data()
             db.reference('live_2d').update(data_2d)
             db.reference('live_2d').update({"update_time": now.strftime("%I:%M:%S %p")})
             
-            # 3D API Sync
-            data_3d = get_3d_via_api()
+            # 2. 3D Update
+            data_3d = get_3d_data()
             if data_3d:
+                # ရက်စွဲကို Firebase key အဖြစ် သုံးရန် (Space ကို Underscore ပြောင်းသည်)
                 clean_date = data_3d['date'].replace(" ", "_")
                 db.reference(f"result_3d/{clean_date}").update({
                     "prize_first": data_3d['prize_first'],
                     "result": data_3d['result']
                 })
+                
+                # နေ့လည် ၄:၃၀ အပိတ်ဂဏန်း သိမ်းဆည်းရန် (2D အတွက်)
+                if now.hour == 16 and now.minute >= 30:
+                    db.reference('live_2d/evening/4:30PM').update({
+                        "set": data_2d['live_set'],
+                        "value": data_2d['live_value'],
+                        "result": data_2d['main_result']
+                    })
 
-            print(f">>> API Sync Success: 2D={data_2d['main_result']}, 3D={data_3d['result']}")
+            print(f">>> Syncing OK: {now.strftime('%H:%M:%S')}")
             
         except Exception as e:
-            print(f">>> Main Loop Error: {e}")
+            print(f">>> Worker Loop Error: {e}")
         
         time.sleep(60)
 
 class HealthHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b"API Scraper Active")
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"MyLuck2D3D API Scraper is Online")
 
 if __name__ == "__main__":
     if initialize_firebase():
