@@ -53,23 +53,24 @@ def get_2d_data():
         print(f">>> SET API Error: {e}")
     return {"live_set": "Waiting", "live_value": "Waiting", "main_result": "--"}
 
-def get_3d_data():
-    """ GLO API မှ နောက်ဆုံးထွက် 3D ဒေတာကို ယူခြင်း """
+def def get_3d_data():
     try:
+        # GLO API ကို တိုက်ရိုက်ခေါ်ယူခြင်း
         url = "https://www.glo.or.th/api/lottery/getLatestLottery"
         res = requests.get(url, timeout=15)
         if res.status_code == 200:
             data = res.json()
-            # GLO API structure အရ ဒေတာထုတ်ယူခြင်း
-            result = data.get('response', {})
-            p1 = result.get('prize1', {}).get('number', "000000")
-            dt = result.get('date', datetime.now(bkk_tz).strftime("%Y-%m-%d"))
+            res_obj = data.get('response', {})
+            p1 = res_obj.get('prize1', {}).get('number', "000000")
             
+            # API မှရလာသော ရက်စွဲကိုယူသည်
+            dt = res_obj.get('date', datetime.now(bkk_tz).strftime("%Y-%m-%d"))
+            
+            # Firebase မှာ သိမ်းမည့် Object
             return {"date": dt, "prize_first": p1, "result": p1[-3:]}
     except Exception as e:
         print(f">>> GLO API Error: {e}")
     return None
-
 def main_worker():
     print(">>> API Scraper Worker Started...")
     while True:
