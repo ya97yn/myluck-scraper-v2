@@ -37,6 +37,7 @@ def initialize_firebase():
     return True
 
 def get_2d_data():
+    """ SET API မှ indexIndustrySectors ကို ရှာဖွေပြီး Million format ဖြင့် ထုတ်ယူခြင်း """
     try:
         url = "https://www.set.or.th/api/set/index/info/list?type=INDEX"
         headers = {
@@ -47,25 +48,31 @@ def get_2d_data():
         
         if res.status_code == 200:
             data = res.json()
-            # API response က list ပုံစံဖြစ်လို့ symbol 'SET' ကို အတိအကျရှာပါသည်
-            set_info = next((item for item in data if item.get('symbol') == 'SET'), None)
+            # Response ရဲ့ indexIndustrySectors list ထဲမှာ 'SET' ကို ရှာပါသည်
+            sectors = data.get('indexIndustrySectors', [])
+            set_info = next((item for item in sectors if item.get('symbol') == 'SET'), None)
             
             if set_info:
-                # API မှ 'last' နှင့် 'value' ကို တိုက်ရိုက်ယူပါသည်
-                last = set_info.get('last')
-                value = set_info.get('value')
+                last_raw = set_info.get('last', 0)
+                value_raw = set_info.get('value', 0)
                 
-                if last and value:
-                    idx = "{:.2f}".format(float(last))
-                    val = "{:.2f}".format(float(value))
-                    # 2D Result တွက်ချက်ခြင်း
-                    res_2d = idx[-1] + val.split('.')[0][-1]
-                    
-                    return {
-                        "live_set": idx,
-                        "live_value": val,
-                        "main_result": res_2d
-                    }
+                # 1. SET Index (live_set) ကို decimal 2 နေရာဖြင့် သိမ်းဆည်းခြင်း
+                idx = "{:.2f}".format(float(last_raw))
+                
+                # 2. Value ကို Million (သန်း) ပြောင်းလဲခြင်း (66700424367 -> 66700.42)
+                # 1,000,000 နှင့် စားပြီး decimal တွက်ချက်ခြင်း
+                val_million = float(value_raw) / 1000000
+                val_str = "{:.2f}".format(val_million) 
+                
+                # 2D Result တွက်ချက်ခြင်း (SET နောက်ဆုံးဂဏန်း + Value အစက်ရှေ့ နောက်ဆုံးဂဏန်း)
+                res_2d = idx[-1] + val_str.split('.')[0][-1]
+                
+                return {
+                    "live_set": idx,
+                    "live_value": val_str,
+                    "main_result": res_2d,
+                    "market_status": set_info.get('marketStatus', 'Unknown')
+                }
         print(f">>> SET API Error: Status {res.status_code}")
     except Exception as e:
         print(f">>> SET API Exception: {e}")
