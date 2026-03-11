@@ -11,7 +11,7 @@ import google.auth.transport.requests
 
 # ========== Configuration ==========
 FIREBASE_URL = os.environ.get("FIREBASE_URL", "https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app").rstrip('/')
-SERVICE_ACCOUNT_INFO = os.environ.get("FIREBASE_SERVICE_ACCOUNT")  # JSON string from Render
+SERVICE_ACCOUNT_INFO = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
 
 if not SERVICE_ACCOUNT_INFO:
     raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable must be set.")
@@ -25,20 +25,20 @@ app = Flask(__name__)
 
 # ---------- Firebase Access Token Generator ----------
 def get_firebase_access_token():
-    """Generate OAuth2 access token using service account."""
     try:
-        # Parse service account JSON from environment variable
         service_account_info = json.loads(SERVICE_ACCOUNT_INFO)
         credentials = service_account.Credentials.from_service_account_info(
             service_account_info, scopes=SCOPES
         )
-        # Request a new token
         request = google.auth.transport.requests.Request()
         credentials.refresh(request)
+        print(f"[{datetime.now().isoformat()}] Access token obtained successfully.")
         return credentials.token
+    except json.JSONDecodeError as e:
+        print(f"[{datetime.now().isoformat()}] ERROR: Service account JSON is invalid: {e}")
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] Failed to get access token: {e}")
-        return None
+        print(f"[{datetime.now().isoformat()}] ERROR: Failed to get access token: {e}")
+    return None
 
 # ---------- SET Data Fetcher ----------
 def fetch_set_data():
@@ -47,7 +47,7 @@ def fetch_set_data():
         response = requests.get(SET_URL, headers=headers, timeout=10)
         response.raise_for_status()
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] Network error: {e}")
+        print(f"[{datetime.now().isoformat()}] ERROR: Network error fetching SET: {e}")
         return None, None
 
     try:
@@ -58,26 +58,27 @@ def fetch_set_data():
                 table = tbl
                 break
         if not table:
+            print(f"[{datetime.now().isoformat()}] ERROR: Table not found on SET page.")
             return None, None
 
         first_row = table.find('tbody').find('tr') if table.find('tbody') else table.find('tr')
         cells = first_row.find_all('td')
         if len(cells) < 8:
+            print(f"[{datetime.now().isoformat()}] ERROR: Unexpected table structure.")
             return None, None
 
         last = cells[1].get_text(strip=True).replace(',', '')
         value = cells[7].get_text(strip=True).replace(',', '')
+        print(f"[{datetime.now().isoformat()}] Fetched SET data: last={last}, value={value}")
         return last, value
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] Parsing error: {e}")
+        print(f"[{datetime.now().isoformat()}] ERROR: Parsing SET page: {e}")
         return None, None
 
 def update_firebase(last, value):
-    """Update live_set and live_value in Firebase using REST API with OAuth2 token."""
     if last is None or value is None:
         return False
 
-    # Get fresh access token
     access_token = get_firebase_access_token()
     if not access_token:
         return False
@@ -89,8 +90,9 @@ def update_firebase(last, value):
     try:
         r = requests.put(set_url, json=last, headers=headers)
         r.raise_for_status()
+        print(f"[{datetime.now().isoformat()}] Firebase live_set updated successfully.")
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] Firebase 'live_set' update failed: {e}")
+        print(f"[{datetime.now().isoformat()}] ERROR: live_set update failed. Status: {r.status_code if 'r' in locals() else 'N/A'}, Response: {r.text if 'r' in locals() else 'N/A'}, Error: {e}")
         return False
 
     # Update live_value
@@ -98,8 +100,9 @@ def update_firebase(last, value):
     try:
         r = requests.put(value_url, json=value, headers=headers)
         r.raise_for_status()
+        print(f"[{datetime.now().isoformat()}] Firebase live_value updated successfully.")
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] Firebase 'live_value' update failed: {e}")
+        print(f"[{datetime.now().isoformat()}] ERROR: live_value update failed. Status: {r.status_code if 'r' in locals() else 'N/A'}, Response: {r.text if 'r' in locals() else 'N/A'}, Error: {e}")
         return False
 
     print(f"[{datetime.now().isoformat()}] Firebase updated: live_set={last}, live_value={value}")
@@ -112,7 +115,7 @@ def scraper_loop():
         if last and value:
             update_firebase(last, value)
         else:
-            print(f"[{datetime.now().isoformat()}] Failed to fetch SET data.")
+            print(f"[{datetime.now().isoformat()}] WARNING: No SET data to update.")
         time.sleep(UPDATE_INTERVAL)
 
 # ---------- Flask Routes ----------
@@ -130,11 +133,9 @@ def health():
 
 # ---------- Main ----------
 if __name__ == "__main__":
-    # Start background scraper thread
     thread = threading.Thread(target=scraper_loop, daemon=True)
     thread.start()
     print(f"[{datetime.now().isoformat()}] Scraper thread started. Web server running...")
 
-    # Get port from environment (Render provides PORT)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
