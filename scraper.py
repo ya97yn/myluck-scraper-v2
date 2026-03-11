@@ -10,7 +10,7 @@ from firebase_admin import credentials, db
 import http.server
 import socketserver
 
-# Render Logs တွင် ချက်ချင်းမြင်ရစေရန်
+# Render Logs အတွက် setup
 os.environ['PYTHONUNBUFFERED'] = "1"
 bkk_tz = pytz.timezone('Asia/Bangkok')
 
@@ -20,12 +20,8 @@ def initialize_firebase():
             sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
             if sa_json:
                 cred = credentials.Certificate(json.loads(sa_json))
-            elif os.path.exists("serviceAccountKey.json"):
-                cred = credentials.Certificate("serviceAccountKey.json")
             else:
-                print(">>> Firebase: No Credentials Found")
-                return False
-                
+                cred = credentials.Certificate("serviceAccountKey.json")
             firebase_admin.initialize_app(cred, {
                 'databaseURL': 'https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app/'
             })
@@ -48,7 +44,7 @@ def get_2d_data():
         
         if res.status_code == 200:
             data = res.json()
-            # Response ရဲ့ indexIndustrySectors list ထဲမှာ 'SET' ကို ရှာပါသည်
+            # indexIndustrySectors list ထဲတွင် 'SET' ကို ရှာပါသည်
             sectors = data.get('indexIndustrySectors', [])
             set_info = next((item for item in sectors if item.get('symbol') == 'SET'), None)
             
@@ -56,15 +52,14 @@ def get_2d_data():
                 last_raw = set_info.get('last', 0)
                 value_raw = set_info.get('value', 0)
                 
-                # 1. SET Index (live_set) ကို decimal 2 နေရာဖြင့် သိမ်းဆည်းခြင်း
+                # ၁။ SET Index (live_set) ကို သိမ်းဆည်းခြင်း
                 idx = "{:.2f}".format(float(last_raw))
                 
-                # 2. Value ကို Million (သန်း) ပြောင်းလဲခြင်း (66700424367 -> 66700.42)
-                # 1,000,000 နှင့် စားပြီး decimal တွက်ချက်ခြင်း
+                # ၂။ Value ကို Million (သန်း) သို့ ပြောင်းလဲခြင်း (66700424367 -> 66700.42)
                 val_million = float(value_raw) / 1000000
                 val_str = "{:.2f}".format(val_million) 
                 
-                # 2D Result တွက်ချက်ခြင်း (SET နောက်ဆုံးဂဏန်း + Value အစက်ရှေ့ နောက်ဆုံးဂဏန်း)
+                # ၃။ 2D Result တွက်ချက်ခြင်း (SET နောက်ဆုံးဂဏန်း + Value အစက်ရှေ့ နောက်ဆုံးဂဏန်း)
                 res_2d = idx[-1] + val_str.split('.')[0][-1]
                 
                 return {
@@ -73,11 +68,10 @@ def get_2d_data():
                     "main_result": res_2d,
                     "market_status": set_info.get('marketStatus', 'Unknown')
                 }
-        print(f">>> SET API Error: Status {res.status_code}")
     except Exception as e:
-        print(f">>> SET API Exception: {e}")
+        print(f">>> SET API Error: {e}")
     
-    return {"live_set": "Waiting", "live_value": "Waiting", "main_result": "--"}
+    return {"live_set": "Waiting", "live_value": "Waiting", "main_result": "--", "market_status": "Closed"}
 
 def get_3d_data():
     """ GLO API မှ 3D ဒေတာကို ထုတ်ယူခြင်း """
@@ -89,29 +83,23 @@ def get_3d_data():
             result = data.get('response', {})
             p1 = result.get('prize1', {}).get('number')
             dt = result.get('date')
-            
             if p1 and dt:
-                return {
-                    "date": str(dt).strip(),
-                    "prize_first": str(p1).strip(),
-                    "result": str(p1).strip()[-3:]
-                }
-    except Exception as e:
-        print(f">>> GLO API Error: {e}")
-    return {"date": "Searching", "prize_first": "Waiting", "result": "---"}
+                return {"date": str(dt).strip(), "prize_first": str(p1), "result": str(p1)[-3:]}
+    except: pass
+    return None
 
 def main_worker():
-    print(">>> Scraper Worker Active...")
+    print(">>> Worker Started: Syncing Real-time Data...")
     while True:
         try:
             now = datetime.now(bkk_tz)
             
-            # 1. 2D Update
+            # 2D Sync
             data_2d = get_2d_data()
             db.reference('live_2d').update(data_2d)
             db.reference('live_2d').update({"update_time": now.strftime("%I:%M:%S %p")})
             
-            # 2. 3D Update
+            # 3D Sync
             data_3d = get_3d_data()
             if data_3d:
                 clean_date = data_3d['date'].replace(" ", "_")
@@ -120,20 +108,15 @@ def main_worker():
                     "result": data_3d['result']
                 })
 
-            print(f">>> Syncing OK: 2D={data_2d['main_result']} | 3D={data_3d['result'] if data_3d else 'None'}")
-            
+            print(f">>> Syncing OK: 2D={data_2d['main_result']} | Time={now.strftime('%H:%M:%S')}")
         except Exception as e:
-            print(f">>> Worker Loop Error: {e}")
+            print(f">>> Loop Error: {e}")
         
-        # ၁ မိနစ်တစ်ခါ စစ်ဆေးမည်
         time.sleep(60)
 
 class HealthHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write(b"MyLuck2D3D API Scraper is Online")
+        self.send_response(200); self.end_headers(); self.wfile.write(b"Scraper Active")
 
 if __name__ == "__main__":
     if initialize_firebase():
@@ -141,4 +124,3 @@ if __name__ == "__main__":
         server = socketserver.TCPServer(("", port), HealthHandler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         main_worker()
-                    
