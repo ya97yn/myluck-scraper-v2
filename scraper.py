@@ -37,32 +37,39 @@ def initialize_firebase():
     return True
 
 def get_2d_data():
-    """ SET API မှ 2D ဒေတာကို ထုတ်ယူခြင်း """
     try:
         url = "https://www.set.or.th/api/set/index/info/list?type=INDEX"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
             'Referer': 'https://www.set.or.th/en/home'
         }
         res = requests.get(url, headers=headers, timeout=15)
+        
         if res.status_code == 200:
             data = res.json()
-            # 'SET' symbol ကို ရှာဖွေခြင်း
+            # API response က list ပုံစံဖြစ်လို့ symbol 'SET' ကို အတိအကျရှာပါသည်
             set_info = next((item for item in data if item.get('symbol') == 'SET'), None)
             
             if set_info:
+                # API မှ 'last' နှင့် 'value' ကို တိုက်ရိုက်ယူပါသည်
                 last = set_info.get('last')
                 value = set_info.get('value')
                 
-                # ဒေတာရှိလျှင် format ချသည်
                 if last and value:
                     idx = "{:.2f}".format(float(last))
                     val = "{:.2f}".format(float(value))
+                    # 2D Result တွက်ချက်ခြင်း
                     res_2d = idx[-1] + val.split('.')[0][-1]
-                    return {"live_set": idx, "live_value": val, "main_result": res_2d}
-        print(f">>> SET API Debug: Status {res.status_code}")
+                    
+                    return {
+                        "live_set": idx,
+                        "live_value": val,
+                        "main_result": res_2d
+                    }
+        print(f">>> SET API Error: Status {res.status_code}")
     except Exception as e:
-        print(f">>> SET API Error: {e}")
+        print(f">>> SET API Exception: {e}")
+    
     return {"live_set": "Waiting", "live_value": "Waiting", "main_result": "--"}
 
 def get_3d_data():
