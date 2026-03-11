@@ -10,18 +10,21 @@ from firebase_admin import credentials, db
 import http.server
 import socketserver
 
-# Render Logs အတွက် setup
+# Render Logs တွင် ချက်ချင်းမြင်ရစေရန်
 os.environ['PYTHONUNBUFFERED'] = "1"
 bkk_tz = pytz.timezone('Asia/Bangkok')
 
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
+            # Environment variable သို့မဟုတ် file မှတစ်ဆင့် credential ယူခြင်း
             sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
             if sa_json:
                 cred = credentials.Certificate(json.loads(sa_json))
             else:
                 cred = credentials.Certificate("serviceAccountKey.json")
+            
+            # သင်၏ Database URL အား အသုံးပြုခြင်း
             firebase_admin.initialize_app(cred, {
                 'databaseURL': 'https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app/'
             })
@@ -44,7 +47,7 @@ def get_2d_data():
         
         if res.status_code == 200:
             data = res.json()
-            # indexIndustrySectors list ထဲတွင် 'SET' ကို ရှာပါသည်
+            # JSON response ထဲမှ indexIndustrySectors list ကို ယူခြင်း
             sectors = data.get('indexIndustrySectors', [])
             set_info = next((item for item in sectors if item.get('symbol') == 'SET'), None)
             
@@ -52,10 +55,10 @@ def get_2d_data():
                 last_raw = set_info.get('last', 0)
                 value_raw = set_info.get('value', 0)
                 
-                # ၁။ SET Index (live_set) ကို သိမ်းဆည်းခြင်း
+                # ၁။ SET Index (live_set) ကို decimal ၂ နေရာဖြင့် ယူခြင်း
                 idx = "{:.2f}".format(float(last_raw))
                 
-                # ၂။ Value ကို Million (သန်း) သို့ ပြောင်းလဲခြင်း (66700424367 -> 66700.42)
+                # ၂။ Value ကို Million (သန်း) သို့ ပြောင်းလဲခြင်း (ဥပမာ- 66700424367 -> 66700.42)
                 val_million = float(value_raw) / 1000000
                 val_str = "{:.2f}".format(val_million) 
                 
@@ -94,14 +97,15 @@ def main_worker():
         try:
             now = datetime.now(bkk_tz)
             
-            # 2D Sync
+            # ၁။ Live 2D Data အား update လုပ်ခြင်း
             data_2d = get_2d_data()
             db.reference('live_2d').update(data_2d)
             db.reference('live_2d').update({"update_time": now.strftime("%I:%M:%S %p")})
             
-            # 3D Sync
+            # ၂။ 3D Result ဒေတာများအား update လုပ်ခြင်း
             data_3d = get_3d_data()
             if data_3d:
+                # ရက်စွဲအား Firebase node key အဖြစ် အသုံးပြုရန် format ပြင်ခြင်း
                 clean_date = data_3d['date'].replace(" ", "_")
                 db.reference(f"result_3d/{clean_date}").update({
                     "prize_first": data_3d['prize_first'],
@@ -112,8 +116,10 @@ def main_worker():
         except Exception as e:
             print(f">>> Loop Error: {e}")
         
+        # ၁ မိနစ်တစ်ခါ ဒေတာစစ်ဆေးခြင်း
         time.sleep(60)
 
+# Render အတွက် Health Check Server
 class HealthHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"Scraper Active")
