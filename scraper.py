@@ -10,21 +10,17 @@ from firebase_admin import credentials, db
 import http.server
 import socketserver
 
-# Render Logs တွင် ချက်ချင်းမြင်ရစေရန်
 os.environ['PYTHONUNBUFFERED'] = "1"
 bkk_tz = pytz.timezone('Asia/Bangkok')
 
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
-            # Environment variable သို့မဟုတ် file မှတစ်ဆင့် credential ယူခြင်း
             sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
             if sa_json:
                 cred = credentials.Certificate(json.loads(sa_json))
             else:
                 cred = credentials.Certificate("serviceAccountKey.json")
-            
-            # သင်၏ Database URL အား အသုံးပြုခြင်း
             firebase_admin.initialize_app(cred, {
                 'databaseURL': 'https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app/'
             })
@@ -36,7 +32,6 @@ def initialize_firebase():
     return True
 
 def get_2d_data():
-    """ SET API မှ indexIndustrySectors ကို ရှာဖွေပြီး Million format ဖြင့် ထုတ်ယူခြင်း """
     try:
         url = "https://www.set.or.th/api/set/index/info/list?type=INDEX"
         headers = {
@@ -47,79 +42,51 @@ def get_2d_data():
         
         if res.status_code == 200:
             data = res.json()
-            # JSON response ထဲမှ indexIndustrySectors list ကို ယူခြင်း
             sectors = data.get('indexIndustrySectors', [])
             set_info = next((item for item in sectors if item.get('symbol') == 'SET'), None)
             
             if set_info:
                 last_raw = set_info.get('last', 0)
                 value_raw = set_info.get('value', 0)
+                # marketDateTime (ဥပမာ- "2026-03-12T00:50:52...") ကို ယူခြင်း
+                raw_time = set_info.get('marketDateTime', "")
                 
-                # ၁။ SET Index (live_set) ကို decimal ၂ နေရာဖြင့် ယူခြင်း
+                # အချိန်ကို Format ချခြင်း (T နှင့် အစက်ကြားရှိ အချိန်အပိုင်းအစကို ယူသည်)
+                try:
+                    formatted_time = raw_time.split('T')[1].split('.')[0] # 00:50:52
+                except:
+                    formatted_time = datetime.now(bkk_tz).strftime("%H:%M:%S")
+
                 idx = "{:.2f}".format(float(last_raw))
-                
-                # ၂။ Value ကို Million (သန်း) သို့ ပြောင်းလဲခြင်း (ဥပမာ- 66700424367 -> 66700.42)
                 val_million = float(value_raw) / 1000000
                 val_str = "{:.2f}".format(val_million) 
-                
-                # ၃။ 2D Result တွက်ချက်ခြင်း (SET နောက်ဆုံးဂဏန်း + Value အစက်ရှေ့ နောက်ဆုံးဂဏန်း)
                 res_2d = idx[-1] + val_str.split('.')[0][-1]
                 
                 return {
                     "live_set": idx,
                     "live_value": val_str,
                     "main_result": res_2d,
-                    "market_status": set_info.get('marketStatus', 'Unknown')
+                    "market_status": set_info.get('marketStatus', 'Unknown'),
+                    "update_time": formatted_time # API မှ အချိန်ကို တိုက်ရိုက်သုံးခြင်း
                 }
     except Exception as e:
         print(f">>> SET API Error: {e}")
-    
-    return {"live_set": "Waiting", "live_value": "Waiting", "main_result": "--", "market_status": "Closed"}
-
-def get_3d_data():
-    """ GLO API မှ 3D ဒေတာကို ထုတ်ယူခြင်း """
-    try:
-        url = "https://www.glo.or.th/api/lottery/getLatestLottery"
-        res = requests.get(url, timeout=15)
-        if res.status_code == 200:
-            data = res.json()
-            result = data.get('response', {})
-            p1 = result.get('prize1', {}).get('number')
-            dt = result.get('date')
-            if p1 and dt:
-                return {"date": str(dt).strip(), "prize_first": str(p1), "result": str(p1)[-3:]}
-    except: pass
     return None
 
 def main_worker():
-    print(">>> Worker Started: Syncing Real-time Data...")
     while True:
         try:
-            now = datetime.now(bkk_tz)
-            
-            # ၁။ Live 2D Data အား update လုပ်ခြင်း
             data_2d = get_2d_data()
-            db.reference('live_2d').update(data_2d)
-            db.reference('live_2d').update({"update_time": now.strftime("%I:%M:%S %p")})
-            
-            # ၂။ 3D Result ဒေတာများအား update လုပ်ခြင်း
-            data_3d = get_3d_data()
-            if data_3d:
-                # ရက်စွဲအား Firebase node key အဖြစ် အသုံးပြုရန် format ပြင်ခြင်း
-                clean_date = data_3d['date'].replace(" ", "_")
-                db.reference(f"result_3d/{clean_date}").update({
-                    "prize_first": data_3d['prize_first'],
-                    "result": data_3d['result']
-                })
-
-            print(f">>> Syncing OK: 2D={data_2d['main_result']} | Time={now.strftime('%H:%M:%S')}")
+            if data_2d:
+                # သင်၏ Database structure အတိုင်း update လုပ်ခြင်း
+                db.reference('live_2d').update(data_2d)
+                print(f">>> Syncing OK: {data_2d['update_time']} | 2D={data_2d['main_result']}")
+            else:
+                print(">>> Waiting for API Data...")
         except Exception as e:
             print(f">>> Loop Error: {e}")
-        
-        # ၁ မိနစ်တစ်ခါ ဒေတာစစ်ဆေးခြင်း
         time.sleep(60)
 
-# Render အတွက် Health Check Server
 class HealthHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"Scraper Active")
