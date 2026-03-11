@@ -3,20 +3,42 @@ from bs4 import BeautifulSoup
 import time
 import os
 import threading
+import json
 from datetime import datetime
 from flask import Flask, jsonify
+from google.oauth2 import service_account
+import google.auth.transport.requests
 
 # ========== Configuration ==========
-FIREBASE_URL = os.environ.get("FIREBASE_URL")
-FIREBASE_SECRET = os.environ.get("FIREBASE_SECRET")
-if not FIREBASE_URL or not FIREBASE_SECRET:
-    raise ValueError("FIREBASE_URL and FIREBASE_SECRET environment variables must be set.")
+FIREBASE_URL = os.environ.get("FIREBASE_URL", "https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app").rstrip('/')
+SERVICE_ACCOUNT_INFO = os.environ.get("FIREBASE_SERVICE_ACCOUNT")  # JSON string from Render
+
+if not SERVICE_ACCOUNT_INFO:
+    raise ValueError("FIREBASE_SERVICE_ACCOUNT environment variable must be set.")
 
 SET_URL = "https://www.set.or.th/en/market/product/stock/overview"
 UPDATE_INTERVAL = 15  # seconds
+SCOPES = ["https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/firebase.database"]
 # ===================================
 
 app = Flask(__name__)
+
+# ---------- Firebase Access Token Generator ----------
+def get_firebase_access_token():
+    """Generate OAuth2 access token using service account."""
+    try:
+        # Parse service account JSON from environment variable
+        service_account_info = json.loads(SERVICE_ACCOUNT_INFO)
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info, scopes=SCOPES
+        )
+        # Request a new token
+        request = google.auth.transport.requests.Request()
+        credentials.refresh(request)
+        return credentials.token
+    except Exception as e:
+        print(f"[{datetime.now().isoformat()}] Failed to get access token: {e}")
+        return None
 
 # ---------- SET Data Fetcher ----------
 def fetch_set_data():
@@ -51,29 +73,33 @@ def fetch_set_data():
         return None, None
 
 def update_firebase(last, value):
-    """Update live_set and live_value in Firebase using REST API."""
+    """Update live_set and live_value in Firebase using REST API with OAuth2 token."""
     if last is None or value is None:
         return False
 
-    # Firebase REST endpoint with auth
-    auth_param = f"auth={FIREBASE_SECRET}"
-    
+    # Get fresh access token
+    access_token = get_firebase_access_token()
+    if not access_token:
+        return False
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+
     # Update live_set
-    set_url = f"{FIREBASE_URL}/live_2d/live_set.json?{auth_param}"
+    set_url = f"{FIREBASE_URL}/live_2d/live_set.json"
     try:
-        r = requests.put(set_url, json=last)
+        r = requests.put(set_url, json=last, headers=headers)
         r.raise_for_status()
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] Firebase set update failed: {e}")
+        print(f"[{datetime.now().isoformat()}] Firebase 'live_set' update failed: {e}")
         return False
 
     # Update live_value
-    value_url = f"{FIREBASE_URL}/live_2d/live_value.json?{auth_param}"
+    value_url = f"{FIREBASE_URL}/live_2d/live_value.json"
     try:
-        r = requests.put(value_url, json=value)
+        r = requests.put(value_url, json=value, headers=headers)
         r.raise_for_status()
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] Firebase value update failed: {e}")
+        print(f"[{datetime.now().isoformat()}] Firebase 'live_value' update failed: {e}")
         return False
 
     print(f"[{datetime.now().isoformat()}] Firebase updated: live_set={last}, live_value={value}")
@@ -81,7 +107,6 @@ def update_firebase(last, value):
 
 # ---------- Background Scraper Thread ----------
 def scraper_loop():
-    """Run in a separate thread, updates Firebase every 15 seconds."""
     while True:
         last, value = fetch_set_data()
         if last and value:
