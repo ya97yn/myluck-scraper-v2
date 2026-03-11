@@ -1,15 +1,18 @@
 import requests
 from bs4 import BeautifulSoup
 import time
-import json
 import os
 import threading
 from datetime import datetime
-from flask import Flask, Response
+from flask import Flask, jsonify
 
 # ========== Configuration ==========
-JSON_FILE = "myluck2d3dresult-default-rtdb-export.json"
-URL = "https://www.set.or.th/en/market/product/stock/overview"
+FIREBASE_URL = os.environ.get("FIREBASE_URL")
+FIREBASE_SECRET = os.environ.get("FIREBASE_SECRET")
+if not FIREBASE_URL or not FIREBASE_SECRET:
+    raise ValueError("FIREBASE_URL and FIREBASE_SECRET environment variables must be set.")
+
+SET_URL = "https://www.set.or.th/en/market/product/stock/overview"
 UPDATE_INTERVAL = 15  # seconds
 # ===================================
 
@@ -19,7 +22,7 @@ app = Flask(__name__)
 def fetch_set_data():
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
-        response = requests.get(URL, headers=headers, timeout=10)
+        response = requests.get(SET_URL, headers=headers, timeout=10)
         response.raise_for_status()
     except Exception as e:
         print(f"[{datetime.now().isoformat()}] Network error: {e}")
@@ -47,61 +50,62 @@ def fetch_set_data():
         print(f"[{datetime.now().isoformat()}] Parsing error: {e}")
         return None, None
 
-def update_json_file(last, value):
+def update_firebase(last, value):
+    """Update live_set and live_value in Firebase using REST API."""
     if last is None or value is None:
         return False
+
+    # Firebase REST endpoint with auth
+    auth_param = f"auth={FIREBASE_SECRET}"
+    
+    # Update live_set
+    set_url = f"{FIREBASE_URL}/live_2d/live_set.json?{auth_param}"
     try:
-        with open(JSON_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        if 'live_2d' in data:
-            data['live_2d']['live_set'] = last
-            data['live_2d']['live_value'] = value
-        else:
-            return False
-        with open(JSON_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        print(f"[{datetime.now().isoformat()}] Updated JSON: live_set={last}, live_value={value}")
-        return True
+        r = requests.put(set_url, json=last)
+        r.raise_for_status()
     except Exception as e:
-        print(f"[{datetime.now().isoformat()}] File error: {e}")
+        print(f"[{datetime.now().isoformat()}] Firebase set update failed: {e}")
         return False
+
+    # Update live_value
+    value_url = f"{FIREBASE_URL}/live_2d/live_value.json?{auth_param}"
+    try:
+        r = requests.put(value_url, json=value)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[{datetime.now().isoformat()}] Firebase value update failed: {e}")
+        return False
+
+    print(f"[{datetime.now().isoformat()}] Firebase updated: live_set={last}, live_value={value}")
+    return True
 
 # ---------- Background Scraper Thread ----------
 def scraper_loop():
-    """Run in a separate thread, updates JSON every 15 seconds."""
+    """Run in a separate thread, updates Firebase every 15 seconds."""
     while True:
         last, value = fetch_set_data()
         if last and value:
-            update_json_file(last, value)
+            update_firebase(last, value)
         else:
-            print(f"[{datetime.now().isoformat()}] Failed to fetch data.")
+            print(f"[{datetime.now().isoformat()}] Failed to fetch SET data.")
         time.sleep(UPDATE_INTERVAL)
 
 # ---------- Flask Routes ----------
 @app.route('/')
 def home():
-    return "SET Scraper is running. JSON is being updated every 15 seconds.", 200
+    return "SET Scraper is running. Firebase is being updated every 15 seconds.", 200
 
 @app.route('/health')
 def health():
-    # Optional: return current status as JSON
-    try:
-        with open(JSON_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        live_set = data.get('live_2d', {}).get('live_set', 'unknown')
-        live_value = data.get('live_2d', {}).get('live_value', 'unknown')
-        return {
-            "status": "ok",
-            "last_update": datetime.now().isoformat(),
-            "live_set": live_set,
-            "live_value": live_value
-        }
-    except:
-        return {"status": "error", "message": "Cannot read JSON"}, 500
+    return jsonify({
+        "status": "ok",
+        "last_update": datetime.now().isoformat(),
+        "firebase_url": FIREBASE_URL
+    })
 
 # ---------- Main ----------
 if __name__ == "__main__":
-    # Start the background scraper thread
+    # Start background scraper thread
     thread = threading.Thread(target=scraper_loop, daemon=True)
     thread.start()
     print(f"[{datetime.now().isoformat()}] Scraper thread started. Web server running...")
