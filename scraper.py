@@ -31,58 +31,64 @@ def initialize_firebase():
 
 def get_live_data():
     current_mm_time = datetime.now(mm_tz).strftime("%I:%M:%S %p")
+    # Default data
     data_2d = {
         "update_time": current_mm_time,
+        "market_status": "Waiting",
         "live_set": "Waiting",
         "live_value": "Waiting",
         "main_result": "--"
     }
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.set.or.th/en/market/product/stock/overview'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
     try:
-        url_2d = "https://www.set.or.th/en/market/product/stock/overview"
-        res = requests.get(url_2d, headers=headers, timeout=15)
+        url = "https://www.set.or.th/en/market/product/stock/overview"
+        res = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # aria-colindex="2" (live_set) နှင့် aria-colindex="8" (live_value) ကို ရှာခြင်း
+        # ၁။ update_time နှင့် market_status ကို ရှာခြင်း (ပုံထဲက small tags များ)
+        small_tags = soup.find_all('small', class_='fs-12px')
+        if len(small_tags) >= 2:
+            # ပထမ small tag က update_time (ဥပမာ- Mar 13, 2026 10:30:00)
+            data_2d["update_time"] = small_tags[0].get_text(strip=True)
+            # ဒုတိယ small tag က market_status (ဥပမာ- Closed သို့မဟုတ် Open)
+            data_2d["market_status"] = small_tags[1].get_text(strip=True)
+
+        # ၂။ Table ထဲမှ Col 2 (Set) နှင့် Col 8 (Value) ကို ရှာခြင်း
         set_row = soup.find('tr', {'indexselected': '0'})
         if set_row:
-            # သင်ညွှန်ပြထားသော Column 2
             col_2 = set_row.find('td', {'aria-colindex': '2'})
-            # သင်ညွှန်ပြထားသော Column 8
             col_8 = set_row.find('td', {'aria-colindex': '8'})
             
             if col_2 and col_8:
-                # div ထဲမှာ ရှိနေရင်လည်း text ကို ဆွဲထုတ်ပေးပါလိမ့်မယ်
                 set_val = col_2.get_text(strip=True).replace(',', '')
                 val_mbaht = col_8.get_text(strip=True).replace(',', '')
                 
                 data_2d["live_set"] = set_val
                 data_2d["live_value"] = val_mbaht
                 
-                # 2D Result တွက်ချက်ခြင်း (ဂဏန်းရှိမှ တွက်ပါမည်)
+                # 2D Result Logic
                 if set_val and val_mbaht and any(char.isdigit() for char in set_val):
-                    # ဒသမကိန်း၏ နောက်ဆုံးဂဏန်းကို ယူရန် logic
                     res_2d = set_val[-1] + val_mbaht.split('.')[0][-1]
                     data_2d["main_result"] = res_2d
+
     except Exception as e:
         print(f">>> Scraping Error: {e}")
 
     return data_2d
 
 def scraper_loop():
-    print(">>> HTML Scraper (Col 2 & 8) Started...")
+    print(">>> Final Scraper Loop Started! Syncing all fields...")
     while True:
-        d2 = get_live_data()
+        data = get_live_data()
         try:
-            db.reference('live_2d').update(d2)
-            print(f">>> Sync: {d2['update_time']} | SET: {d2['live_set']} | VAL: {d2['live_value']}")
+            db.reference('live_2d').update(data)
+            print(f">>> Updated: {data['update_time']} | Status: {data['market_status']}")
         except Exception as e:
-            print(f">>> Firebase Update Error: {e}")
+            print(f">>> Firebase Error: {e}")
         time.sleep(15)
 
 if initialize_firebase():
@@ -90,7 +96,7 @@ if initialize_firebase():
 
 @app.route('/')
 def home():
-    return f"SET Scraper Active. MM Time: {datetime.now(mm_tz).strftime('%I:%M:%S %p')}", 200
+    return "SET Scraper v3 is running with full field support!", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
