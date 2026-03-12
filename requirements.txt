@@ -1,6 +1,6 @@
 requests
 beautifulsoup4
-flask
-gunicorn
-google-auth
 firebase-admin
+pytz
+flask
+google-auth
