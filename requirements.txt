@@ -1,7 +1,5 @@
 requests
-beautifulsoup4
 firebase-admin
 pytz
 flask
-google-auth
 gunicorn
