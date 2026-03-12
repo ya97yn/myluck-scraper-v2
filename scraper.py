@@ -29,68 +29,79 @@ def initialize_firebase():
             print(f">>> Firebase Init Error: {e}")
     return firebase_admin._apps is not None
 
-def get_data_from_html():
+def get_live_data():
     current_mm_time = datetime.now(mm_tz).strftime("%I:%M:%S %p")
-    results = {"update_time": current_mm_time}
+    data_2d = {
+        "update_time": current_mm_time,
+        "live_set": "Waiting",
+        "live_value": "Waiting",
+        "main_result": "--"
+    }
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
-    # --- 2D Scraping (SET Index Table) ---
+    # --- 2D HTML Scraping ---
     try:
-        set_url = "https://www.set.or.th/en/market/product/stock/overview"
-        res = requests.get(set_url, headers=headers, timeout=15)
+        url_2d = "https://www.set.or.th/en/market/product/stock/overview"
+        res = requests.get(url_2d, headers=headers, timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Table 0 ထဲက SET row ကို ရှာခြင်း
+        # Table ထဲမှ SET row ကို ရှာဖွေခြင်း
         table = soup.find('table')
-        rows = table.find_all('tr')
-        for row in rows:
-            cols = row.find_all('td')
-            if cols and 'SET' in cols[0].text:
-                last_val = cols[1].text.strip().replace(',', '') # 1,429.80
-                m_baht = cols[7].text.strip().replace(',', '')  # 64,496.48
-                
-                results['live_set'] = last_val
-                results['live_value'] = m_baht
-                # 2D Result တွက်ချက်ခြင်း
-                res_2d = last_val[-1] + m_baht.split('.')[0][-1]
-                results['main_result'] = res_2d
-                break
+        if table:
+            rows = table.find_all('tr')
+            for row in rows:
+                cols = row.find_all('td')
+                if cols and "SET" in cols[0].get_text(strip=True):
+                    # သင်အလိုရှိသော Last နှင့် Value (M.Baht)
+                    last_val = cols[1].get_text(strip=True).replace(',', '')
+                    value_mbaht = cols[7].get_text(strip=True).replace(',', '')
+                    
+                    data_2d["live_set"] = last_val
+                    data_2d["live_value"] = value_mbaht
+                    # 2D Result တွက်ချက်ခြင်း (SET နောက်ဆုံးဂဏန်း + Value အစက်ရှေ့ နောက်ဆုံးဂဏန်း)
+                    res_2d = last_val[-1] + value_mbaht.split('.')[0][-1]
+                    data_2d["main_result"] = res_2d
+                    break
     except Exception as e:
-        print(f">>> 2D HTML Error: {e}")
+        print(f">>> 2D Scraping Error: {e}")
 
-    # --- 3D Scraping (Lotto) ---
+    # --- 3D HTML Scraping ---
+    data_3d = {"live_3d": "Waiting", "last_date": "--"}
     try:
-        # 3D အတွက် Thai Lotto website တစ်ခုခုမှ ယူခြင်း (ဥပမာပေးထားခြင်းဖြစ်ပါသည်)
-        lotto_url = "https://www.glo.or.th/home-page" 
-        # မှတ်ချက် - 3D က တစ်လ ၂ ကြိမ်သာ ထွက်သဖြင့် ပုံသေ ဒေတာ သို့မဟုတ် အခြား Source သုံးရန် လိုအပ်နိုင်ပါသည်
-        results['live_3d'] = "---" # 3D result logic 
-    except Exception as e:
-        print(f">>> 3D HTML Error: {e}")
+        url_3d = "https://www.thailotto.com/" # နမူနာ website
+        res_3d = requests.get(url_3d, headers=headers, timeout=15)
+        soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
+        # ဤနေရာတွင် 3D result ပါသော HTML tag ကို ရှာရပါမည်
+        # ဥပမာ - results = soup_3d.find('div', class_='3d-result').text
+        data_3d["live_3d"] = "123" # နမူနာဂဏန်း
+        data_3d["last_date"] = "16-03-2026"
+    except:
+        pass
 
-    return results
+    return data_2d, data_3d
 
 def scraper_loop():
-    print(">>> HTML Scraper Started (Myanmar Time)")
+    print(">>> Scraper Started (2D/3D HTML Syncing...)")
     while True:
-        data = get_data_from_html()
+        d2, d3 = get_live_data()
         try:
-            # Firebase ရဲ့ live_2d node အောက်ကို update လုပ်ခြင်း
-            db.reference('live_2d').update(data)
-            print(f">>> Firebase HTML Sync: {data['update_time']}")
+            # Firebase Structure အတိုင်း update လုပ်ခြင်း
+            db.reference('live_2d').update(d2)
+            db.reference('live_3d').update(d3)
+            print(f">>> Sync OK: {d2['update_time']}")
         except Exception as e:
             print(f">>> Firebase Update Error: {e}")
         time.sleep(15)
 
 if initialize_firebase():
-    thread = threading.Thread(target=scraper_loop, daemon=True)
-    thread.start()
+    threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
 def home():
-    return f"HTML Scraper is Active. Time: {datetime.now(mm_tz).strftime('%I:%M:%S %p')}", 200
+    return f"Live Scraper Active. Time: {datetime.now(mm_tz).strftime('%I:%M:%S %p')}", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
