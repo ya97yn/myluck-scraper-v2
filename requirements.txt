@@ -3,3 +3,4 @@ beautifulsoup4
 flask
 gunicorn
 google-auth
+firebase-admin
