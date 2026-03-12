@@ -3,3 +3,4 @@ firebase-admin
 pytz
 flask
 gunicorn
+beautifulsoup4
