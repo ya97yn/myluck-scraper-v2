@@ -31,7 +31,12 @@ def initialize_firebase():
 def get_2d_data():
     try:
         url = "https://www.set.or.th/api/set/index/info/list?type=INDEX"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        # API မှ Bot ဟု မထင်စေရန် Browser အစစ်ကဲ့သို့ Headers များ အသုံးပြုခြင်း
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': 'https://www.set.or.th/en/market/product/stock/overview'
+        }
         res = requests.get(url, headers=headers, timeout=15)
         
         if res.status_code == 200:
@@ -53,6 +58,11 @@ def get_2d_data():
                     "market_status": set_info.get('marketStatus', 'Unknown'),
                     "update_time": formatted_time
                 }
+            else:
+                print(">>> API Debug: SET data not found in response JSON.")
+        else:
+            # API မှ 200 OK မပေးပါက အကြောင်းရင်းကို Log တွင် ပြသမည်
+            print(f">>> API Debug: Request Failed! Status Code: {res.status_code}")
     except Exception as e:
         print(f">>> API Error: {e}")
     return None
@@ -64,12 +74,11 @@ def scraper_loop():
         if data:
             db.reference('live_2d').update(data)
             print(f">>> Firebase Updated: {data['update_time']} | Result: {data['main_result']}")
+        else:
+            # ဒေတာမရပါက တိတ်တိတ်လေးမနေတော့ဘဲ Waiting ဟု ပြသမည်
+            print(f">>> Waiting: API data unavailable. Time: {datetime.now(bkk_tz).strftime('%I:%M:%S %p')}")
         time.sleep(15)
 
-# ==========================================
-# အဓိက ပြင်ဆင်ချက် (Gunicorn အတွက်)
-# Scraper Loop ကို __main__ အပြင်ဘက်တွင် တိုက်ရိုက် စတင်ပေးခြင်း
-# ==========================================
 if initialize_firebase():
     thread = threading.Thread(target=scraper_loop, daemon=True)
     thread.start()
@@ -78,7 +87,6 @@ if initialize_firebase():
 def home():
     return "SET Scraper is successfully running in the background!", 200
 
-# လောလောဆယ် Local မှာ Run ဖို့အတွက်သာ (Render တွင် gunicorn က ဤအပိုင်းကို ကျော်သွားမည်)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
