@@ -11,7 +11,6 @@ from flask import Flask
 
 app = Flask(__name__)
 os.environ['PYTHONUNBUFFERED'] = "1"
-# မြန်မာစံတော်ချိန် (Myanmar Time) အတွက် သတ်မှတ်ခြင်း
 mm_tz = pytz.timezone('Asia/Yangon')
 
 def initialize_firebase():
@@ -32,6 +31,7 @@ def initialize_firebase():
 def get_2d_data():
     current_mm_time = datetime.now(mm_tz).strftime("%I:%M:%S %p")
     try:
+        # SET API Link အမှန် (ဒီ Link က ဈေးကွက်ဖွင့်ချိန်မှ ဒေတာအစစ် ပေးပါလိမ့်မယ်)
         url = "https://www.set.or.th/api/set/index/info/list?type=INDEX"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -46,42 +46,46 @@ def get_2d_data():
             
             if set_info:
                 idx = "{:.2f}".format(float(set_info.get('last', 0)))
-                val_million = float(set_info.get('value', 0)) / 1000000
+                val_raw = float(set_info.get('value', 0))
+                # Million ပြောင်းလဲခြင်း
+                val_million = val_raw / 1000000
                 val_str = "{:.2f}".format(val_million) 
+                
+                # ၂လုံးထွက်ဂဏန်း တွက်ချက်ခြင်း (Variable နာမည်ကို res_2d ဟု ပြင်ထားသည်)
                 res_2d = idx[-1] + val_str.split('.')[0][-1]
 
                 return {
                     "live_set": idx,
                     "live_value": val_str,
-                    "main_result": res_2_d,
+                    "main_result": res_2d,
                     "market_status": set_info.get('marketStatus', 'Unknown'),
-                    "update_time": current_mm_time # မြန်မာစံတော်ချိန်
+                    "update_time": current_mm_time
                 }
     except Exception as e:
         print(f">>> API Error: {e}")
     
-    # API မှ ဒေတာမရလျှင်လည်း အချိန်ကိုသာ Update လုပ်ရန် ပို့ပေးခြင်း
+    # ဒေတာမရလျှင် အချိန်ကိုသာ update လုပ်ပေးမည်
     return {
         "update_time": current_mm_time,
-        "market_status": "Waiting for Market..."
+        "market_status": "Waiting for Data..."
     }
 
 def scraper_loop():
-    print(">>> Scraper Background Thread Started! Syncing with Myanmar Time...")
+    print(">>> Scraper Background Thread Started! (Myanmar Time)")
     while True:
         data = get_2d_data()
         if data:
             try:
-                # ဒေတာအကုန်မရလျှင်လည်း ရှိသလောက် (အထူးသဖြင့် အချိန်) ကို Update လုပ်မည်
                 db.reference('live_2d').update(data)
-                print(f">>> Firebase Sync: {data['update_time']}")
+                print(f">>> Firebase Sync OK: {data['update_time']}")
             except Exception as e:
                 print(f">>> Firebase Update Error: {e}")
         time.sleep(15)
 
-# Scraper ကို စတင်ခြင်း
+# Scraper စတင်ခြင်း
 if initialize_firebase():
-    threading.Thread(target=scraper_loop, daemon=True).start()
+    thread = threading.Thread(target=scraper_loop, daemon=True)
+    thread.start()
 
 @app.route('/')
 def home():
