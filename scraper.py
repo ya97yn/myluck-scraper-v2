@@ -11,14 +11,15 @@ from firebase_admin import credentials, db
 from flask import Flask
 
 app = Flask(__name__)
-# Render logs အတွက် ပတ်ဝန်းကျင် ပြင်ဆင်ခြင်း
+# Render logs များတွင် စာသားများ ချက်ချင်းပေါ်လာစေရန်
 os.environ['PYTHONUNBUFFERED'] = "1"
-# ဗန်ကောက်စံတော်ချိန် သတ်မှတ်ခြင်း
+# ဗန်ကောက်စံတော်ချိန် သတ်မှတ်ခြင်း (SET Index အချိန်နှင့် ကိုက်ညီစေရန်)
 bkk_tz = pytz.timezone('Asia/Bangkok')
 
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
+            # Render Environment Variable မှ Key ကို ယူခြင်း
             sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
             if sa_json:
                 cred = credentials.Certificate(json.loads(sa_json))
@@ -32,15 +33,14 @@ def initialize_firebase():
     return firebase_admin._apps is not None
 
 def get_live_data():
-    # လက်ရှိအချိန်ကို ယူခြင်း
     now = datetime.now(bkk_tz)
     current_time = now.strftime("%I:%M:%S %p")
     
     data_2d = {
         "update_time": current_time,
-        "market_status": "Closed",
-        "live_set": "Waiting",
-        "live_value": "Waiting",
+        "market_status": "Waiting",
+        "live_set": "-",
+        "live_value": "-",
         "main_result": "--"
     }
     
@@ -53,38 +53,39 @@ def get_live_data():
         response = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Table ထဲမှ SET row ကို ရှာဖွေခြင်း (indexselected='0' သည် SET row ဖြစ်သည်)
-        row = soup.find('tr', {'indexselected': '0'})
+        # ၁။ Market Status ကို Website မှ တိုက်ရိုက်ဖတ်ခြင်း (Pre-Open2 စသည်)
+        status_tag = soup.find('div', class_=lambda x: x and 'market-status' in x)
+        if status_tag:
+            data_2d["market_status"] = status_tag.get_text(strip=True)
         
+        # ၂။ SET Index (Last) နှင့် Value (M.Baht) ကို Table မှ ရှာဖွေခြင်း
+        row = soup.find('tr', {'indexselected': '0'})
         if row:
-            # Column 2 (Last) နှင့် Column 8 (Value M.Baht) ကို ယူခြင်း
             cells = row.find_all('td')
             if len(cells) >= 8:
-                # ဒေတာများကို သန့်စင်ခြင်း (ကော်မာများ ဖယ်ထုတ်ခြင်း)
-                last_val = cells[1].get_text(strip=True).replace(',', '')
-                value_mbat = cells[7].get_text(strip=True).replace(',', '')
+                # ဒေတာများကို သန့်စင်ပြီး Format ချခြင်း
+                raw_last = cells[1].get_text(strip=True).replace(',', '')
+                raw_value = cells[7].get_text(strip=True).replace(',', '')
                 
-                # ဒေတာများကို format ချခြင်း
-                live_set = "{:.2f}".format(float(last_val))
-                live_value = "{:.2f}".format(float(value_mbat))
+                live_set = "{:.2f}".format(float(raw_last))
+                live_value = "{:.2f}".format(float(raw_value))
                 
-                # 2D Result တွက်ချက်ခြင်း (SET နောက်ဆုံးဂဏန်း + Value အစက်ရှေ့ နောက်ဆုံးဂဏန်း)
+                # 2D Result တွက်ချက်ခြင်း
                 main_result = live_set[-1] + live_value.split('.')[0][-1]
                 
                 data_2d.update({
                     "live_set": live_set,
                     "live_value": live_value,
-                    "main_result": main_result,
-                    "market_status": "Open"
+                    "main_result": main_result
                 })
                 
-                # သင်၏ Firebase structure (morning/evening) ထဲသို့ အချိန်အလိုက် ထည့်သွင်းခြင်း
+                # ၃။ Morning/Evening Structure အလိုက် ဒေတာခွဲထည့်ခြင်း
                 if now.hour < 13:
                     data_2d["morning"] = {"update_time": current_time}
                 else:
                     data_2d["evening"] = {
-                        "live_set": live_set, 
-                        "live_value": live_value, 
+                        "live_set": live_set,
+                        "live_value": live_value,
                         "main_result": main_result
                     }
     except Exception as e:
@@ -93,26 +94,29 @@ def get_live_data():
     return data_2d
 
 def scraper_loop():
-    print(">>> BeautifulSoup Scraper Started...")
+    print(">>> BeautifulSoup Scraper v9 Started...")
     while True:
         if firebase_admin._apps:
             d2 = get_live_data()
             try:
-                # live_2d node အောက်သို့ ဒေတာများကို update လုပ်ခြင်း
+                # live_2d node အောက်သို့ update လုပ်ခြင်း
                 db.reference('live_2d').update(d2)
-                print(f">>> Updated: {d2['update_time']} | 2D: {d2.get('main_result', '--')}")
+                print(f">>> Updated: {d2['update_time']} | Status: {d2['market_status']}")
             except Exception as e:
                 print(f">>> Firebase Update Error: {e}")
-        time.sleep(20) # ၂၀ စက္ကန့်တစ်ခါ ပတ်မည်
+        # ၂၀ စက္ကန့်တစ်ခါ ဒေတာအသစ်စစ်ဆေးမည်
+        time.sleep(20)
 
 if initialize_firebase():
+    # Scraper ကို Thread တစ်ခုအနေဖြင့် နောက်ကွယ်တွင် ပတ်ခိုင်းထားခြင်း
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
 def home():
-    return "BeautifulSoup Scraper Active", 200
+    return "Scraper v9 is Live and Running", 200
 
 if __name__ == "__main__":
+    # Render ၏ Port သတ်မှတ်ချက်ကို ယူခြင်း
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
     
