@@ -11,15 +11,13 @@ from firebase_admin import credentials, db
 from flask import Flask
 
 app = Flask(__name__)
-# Render logs များတွင် စာသားများ ချက်ချင်းပေါ်လာစေရန်
+# Logs များ ချက်ချင်းပေါ်လာစေရန်
 os.environ['PYTHONUNBUFFERED'] = "1"
-# ဗန်ကောက်စံတော်ချိန် သတ်မှတ်ခြင်း (SET Index အချိန်နှင့် ကိုက်ညီစေရန်)
-bkk_tz = pytz.timezone('Asia/Bangkok')
+mm_tz = pytz.timezone('Asia/Yangon')
 
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
-            # Render Environment Variable မှ Key ကို ယူခြင်း
             sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
             if sa_json:
                 cred = credentials.Certificate(json.loads(sa_json))
@@ -33,90 +31,80 @@ def initialize_firebase():
     return firebase_admin._apps is not None
 
 def get_live_data():
-    now = datetime.now(bkk_tz)
-    current_time = now.strftime("%I:%M:%S %p")
+    now_mm = datetime.now(mm_tz)
+    current_time = now_mm.strftime("%d %b %Y %H:%M:%S")
     
     data_2d = {
         "update_time": current_time,
         "market_status": "Waiting",
-        "live_set": "-",
-        "live_value": "-",
-        "main_result": "--"
+        "live_set": "-", "live_value": "-", "main_result": "--"
     }
+    last_draw = {"date": "-", "first_prize": "-", "result": "-"}
     
-    url = "https://www.set.or.th/en/market/product/stock/overview"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
+    # --- 2D Scraping ---
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        res_2d = requests.get("https://www.set.or.th/en/market/product/stock/overview", headers=headers, timeout=15)
+        soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
-        # ၁။ Market Status ကို Website မှ တိုက်ရိုက်ဖတ်ခြင်း (Pre-Open2 စသည်)
-        status_tag = soup.find('div', class_=lambda x: x and 'market-status' in x)
+        # Market Status ကို Website မှ အတိအကျဖတ်ခြင်း
+        status_tag = soup_2d.select_one(".market-status, [class*='market-status']")
         if status_tag:
-            data_2d["market_status"] = status_tag.get_text(strip=True)
-        
-        # ၂။ SET Index (Last) နှင့် Value (M.Baht) ကို Table မှ ရှာဖွေခြင်း
-        row = soup.find('tr', {'indexselected': '0'})
-        if row:
-            cells = row.find_all('td')
-            if len(cells) >= 8:
-                # ဒေတာများကို သန့်စင်ပြီး Format ချခြင်း
-                raw_last = cells[1].get_text(strip=True).replace(',', '')
-                raw_value = cells[7].get_text(strip=True).replace(',', '')
-                
-                live_set = "{:.2f}".format(float(raw_last))
-                live_value = "{:.2f}".format(float(raw_value))
-                
-                # 2D Result တွက်ချက်ခြင်း
-                main_result = live_set[-1] + live_value.split('.')[0][-1]
-                
-                data_2d.update({
-                    "live_set": live_set,
-                    "live_value": live_value,
-                    "main_result": main_result
-                })
-                
-                # ၃။ Morning/Evening Structure အလိုက် ဒေတာခွဲထည့်ခြင်း
-                if now.hour < 13:
-                    data_2d["morning"] = {"update_time": current_time}
-                else:
-                    data_2d["evening"] = {
-                        "live_set": live_set,
-                        "live_value": live_value,
-                        "main_result": main_result
-                    }
-    except Exception as e:
-        print(f">>> Scraping Error: {e}")
+            # "Market Status: Pre-Open2" ထဲမှ "Pre-Open2" ကိုသာ ယူပါမည်
+            data_2d["market_status"] = status_tag.get_text(strip=True).replace("Market Status:", "").strip()
 
-    return data_2d
+        row = soup_2d.find('tr', {'indexselected': '0'})
+        if row:
+            c2 = row.find('td', {'aria-colindex': '2'})
+            c8 = row.find('td', {'aria-colindex': '8'})
+            if c2 and c8:
+                sv = c2.get_text(strip=True).replace(',', '')
+                vv = c8.get_text(strip=True).replace(',', '')
+                if sv and vv and sv != "-":
+                    data_2d.update({"live_set": sv, "live_value": vv})
+                    data_2d["main_result"] = sv[-1] + vv.split('.')[0][-1]
+    except: pass
+
+    # --- 3D Scraping ---
+    try:
+        res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
+        soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
+        h2_date = soup_3d.find('h2', {'data-v-4d58a094': True})
+        if h2_date: last_draw["date"] = h2_date.get_text(strip=True)
+            
+        award_div = soup_3d.find('div', class_='award1-item')
+        if award_div:
+            p_tag = award_div.find('p', class_='award1-item-sub')
+            if p_tag:
+                clean_prize = "".join(filter(str.isdigit, p_tag.get_text(strip=True)))
+                if len(clean_prize) >= 6:
+                    last_draw["first_prize"] = clean_prize
+                    last_draw["result"] = clean_prize[-3:]
+    except: pass
+
+    return data_2d, last_draw
 
 def scraper_loop():
-    print(">>> BeautifulSoup Scraper v9 Started...")
+    print(">>> Scraper v16 (Final Status Fix) Started...")
     while True:
         if firebase_admin._apps:
-            d2 = get_live_data()
+            d2, d3 = get_live_data()
             try:
-                # live_2d node အောက်သို့ update လုပ်ခြင်း
                 db.reference('live_2d').update(d2)
+                db.reference('result_3d/last_draw').update(d3)
                 print(f">>> Updated: {d2['update_time']} | Status: {d2['market_status']}")
             except Exception as e:
-                print(f">>> Firebase Update Error: {e}")
-        # ၂၀ စက္ကန့်တစ်ခါ ဒေတာအသစ်စစ်ဆေးမည်
+                print(f">>> FB Error: {e}")
         time.sleep(20)
 
 if initialize_firebase():
-    # Scraper ကို Thread တစ်ခုအနေဖြင့် နောက်ကွယ်တွင် ပတ်ခိုင်းထားခြင်း
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home():
-    return "Scraper v9 is Live and Running", 200
+def home(): return "Scraper v16 is Running", 200
 
 if __name__ == "__main__":
-    # Render ၏ Port သတ်မှတ်ချက်ကို ယူခြင်း
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-          
+    
