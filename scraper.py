@@ -12,7 +12,6 @@ from flask import Flask
 
 app = Flask(__name__)
 os.environ['PYTHONUNBUFFERED'] = "1"
-# SET Index အတွက် Bangkok Time ကို အသုံးပြုပါသည်
 bkk_tz = pytz.timezone('Asia/Bangkok')
 
 def initialize_firebase():
@@ -36,7 +35,7 @@ def get_live_data():
     
     data_2d = {
         "update_time": current_time,
-        "market_status": "Closed", # Default အနေဖြင့် Closed ဟု ထားပါသည်
+        "market_status": "Waiting",
         "live_set": "-",
         "live_value": "-",
         "main_result": "--"
@@ -51,13 +50,17 @@ def get_live_data():
         response = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # ၁။ Market Status ကို ပိုမိုတိကျသော selector ဖြင့် ရှာဖွေခြင်း
-        # Pre-Open2 သို့မဟုတ် Open စာသားပါသော class ကို ရှာပါသည်
-        status_element = soup.select_one(".market-status, [class*='market-status']")
-        if status_element:
-            data_2d["market_status"] = status_element.get_text(strip=True)
+        # ၁။ Market Status ကို ပိုမိုတိကျစွာ ရှာဖွေခြင်း
+        # class ထဲတွင် 'market-status' ပါဝင်သည့် မည်သည့် tag ကိုမဆို ရှာပါသည်
+        status_tag = soup.find(lambda tag: tag.name in ['div', 'span'] and tag.has_attr('class') and any('market-status' in c for c in tag['class']))
         
-        # ၂။ SET Index (Table 0, Row 0) ကို ရှာဖွေခြင်း
+        if status_tag:
+            # Website မှရသော စာသားကို သန့်စင်ခြင်း
+            status_text = status_tag.get_text(strip=True)
+            if status_text:
+                data_2d["market_status"] = status_text
+        
+        # ၂။ SET Index နှင့် Value ကို ရှာဖွေခြင်း
         row = soup.find('tr', {'indexselected': '0'})
         if row:
             cells = row.find_all('td')
@@ -65,7 +68,6 @@ def get_live_data():
                 last_val = cells[1].get_text(strip=True).replace(',', '')
                 value_mbat = cells[7].get_text(strip=True).replace(',', '')
                 
-                # ဂဏန်းဟုတ်မဟုတ် စစ်ဆေးပြီး Format ချခြင်း
                 if last_val and value_mbat:
                     live_set = "{:.2f}".format(float(last_val))
                     live_value = "{:.2f}".format(float(value_mbat))
@@ -77,7 +79,7 @@ def get_live_data():
                         "main_result": main_result
                     })
                     
-                    # Firebase structure အလိုက် ဒေတာပို့ခြင်း
+                    # Firebase structure အလိုက် ဒေတာခွဲပို့ခြင်း
                     if now.hour < 13:
                         data_2d["morning"] = {"update_time": current_time}
                     else:
@@ -87,12 +89,12 @@ def get_live_data():
                             "main_result": main_result
                         }
     except Exception as e:
-        print(f">>> Error fetching data: {e}")
+        print(f">>> Scraping Error: {e}")
 
     return data_2d
 
 def scraper_loop():
-    print(">>> Scraper Started (Status Fix Applied)...")
+    print(">>> Scraper v11 (Status Deep Search) Started...")
     while True:
         if firebase_admin._apps:
             d2 = get_live_data()
@@ -100,15 +102,16 @@ def scraper_loop():
                 db.reference('live_2d').update(d2)
                 print(f">>> Updated: {d2['update_time']} | Status: {d2['market_status']}")
             except Exception as e:
-                print(f">>> Firebase Update Error: {e}")
+                print(f">>> FB Update Error: {e}")
         time.sleep(20)
 
 if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home(): return "Scraper v10 Active", 200
+def home(): return "Scraper v11 Active", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+    
