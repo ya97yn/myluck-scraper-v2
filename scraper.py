@@ -80,8 +80,8 @@ def get_live_data():
         res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
         soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
         h2_date = soup_3d.find('div', class_="ol-12 col-md-6 col-lg-8")
-       if h2_date: 
-           if h2_tag = h2_date.find('h2')
+       if h2_date:
+            if h2_tag = h2_date.find('h2')
            last_draw["date"] = h2_tag.get_text(strip=True)
         award_div = soup_3d.find('div', class_='award1-item')
        if award_div:
