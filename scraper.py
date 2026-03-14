@@ -64,7 +64,7 @@ def get_live_data():
         row = soup_2d.find('tr', {'indexselected': '0'})
         if row:
             c2 = row.find('td', {'aria-colindex': '2'})
-            if c2_span =c2_container.find("span")
+            if c2_span = c2.find("span")
             c8 = row.find('td', {'aria-colindex': '5'})
             
             if c2 and c8:
@@ -81,10 +81,10 @@ def get_live_data():
         res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
         soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
         h2_date = soup_3d.find('div', class_="ol-12 col-md-6 col-lg-8")
-        if h2_date: last_draw["date"] = h2_date.get_text(strip=True)
+       if h2_date: last_draw["date"] = h2_date.get_text(strip=True)
         award_div = soup_3d.find('div', class_='award1-item')
-        if award_div:
-            font_tag = award_div.find('font','font','p', class_='award1-item-sub')
+       if award_div:
+            p_tag = award_div.find('p', class_='award1-item-sub')
             if p_tag:
                 clean_prize = "".join(filter(str.isdigit, p_tag.get_text(strip=True)))
                 if len(clean_prize) >= 6:
