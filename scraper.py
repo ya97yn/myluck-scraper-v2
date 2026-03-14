@@ -1,129 +1,128 @@
 import os
 import json
 import time
-import threading
 import requests
-import re
-from flask import Flask
+import threading
+from datetime import datetime
+import pytz
 from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, db
+from flask import Flask
 
 app = Flask(__name__)
+os.environ['PYTHONUNBUFFERED'] = "1"
+mm_tz = pytz.timezone('Asia/Yangon')
 
-# ---------------- Firebase ----------------
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
-            sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
-            cred = credentials.Certificate(json.loads(sa_json))
-            firebase_admin.initialize_app(cred, {
-                'databaseURL': 'https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app/'
-            })
-            print("Firebase Connected")
-            return True
+            sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
+            if sa_json:
+                cred = credentials.Certificate(json.loads(sa_json))
+                firebase_admin.initialize_app(cred, {
+                    'databaseURL': 'https://myluck2d3dresult-default-rtdb.asia-southeast1.firebasedatabase.app/'
+                })
+                print(">>> Firebase: Connected Successfully")
+                return True
         except Exception as e:
-            print("Firebase Error:", e)
-            return False
-    return True
+            print(f">>> Firebase Init Error: {e}")
+    return firebase_admin._apps is not None
 
-
-# ---------------- Scraping ----------------
 def get_live_data():
     data_2d = {
         "update_time": "-",
         "market_status": "_",
-        "live_set": "-",
-        "live_value": "-",
-        "main_result": "--"
+        "live_set": "-", "live_value": "-", "main_result": "--"
     }
+    last_draw = {"date": "-", "first_prize": "-", "result": "-"}
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-    last_draw = {
-        "date": "-",
-        "first_prize": "-",
-        "result": "-"
-    }
-
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    # ---------- SET ----------
+    # --- 2D Scraping (SET Home) ---
     try:
-        r = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
-        soup = BeautifulSoup(r.text, "html.parser")
-        text = soup.get_text(" ", strip=True)
+        res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
+        soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
+        
+        # ၁။ Market Status (မြှားအစိမ်းရောင်နေရာ)
+        status_div = soup_2d.find("div", class_="text-black")
+        if status_div:
+            status_span = status_div.find("span")
+            if status_span:
+                data_2d["market_status"] = status_span.get_text(strip=True)
 
-        # Market Status
-        status = re.search(r'Market Status\s+(\w+)', text)
-        if status:
-            data_2d["market_status"] = status.group(1)
+        # ၂။ Update Time (မြှားအဝါရောင်နေရာ - "Last update" စာသားဖယ်ထုတ်ခြင်း)
+        # raw-html class ပါသော parent div ထဲက ဒုတိယမြောက် div ကို ယူပါမည်
+        parent_raw = soup_2d.select_one(".raw-html")
+        if parent_raw:
+            all_divs = parent_raw.find_all("div", recursive=False)
+            if len(all_divs) >= 2:
+                time_raw = all_divs[1].get_text(strip=True)
+                # စာသားထဲမှ ရှေ့ဆက်များကို အကုန်ဖယ်ထုတ်ပါသည်
+                for word in ["Last updated", "Last update"]:
+                    time_raw = time_raw.replace(word, "")
+                data_2d["update_time"] = time_raw.strip()
 
-        # Last Update
-        update = re.search(r'Last Update\s+([0-9]{1,2}\s+\w+\s+[0-9]{4}\s+[0-9:]+)', text)
-        if update:
-            data_2d["update_time"] = update.group(1)
+        # ၃။ Live SET & Value (tr indexselected="0" မှ ယူခြင်း)
+        row = soup_2d.find("tr", {"indexselected": "0"})
+        if row:
+            # Live SET
+            c2 = row.find("td", {"aria-colindex": "2"})
+            if c2: data_2d["live_set"] = c2.get_text(strip=True).replace(',', '')
+            # Live Value
+            c5 = row.find("td", {"aria-colindex": "5"})
+            if c5: data_2d["live_value"] = c5.get_text(strip=True).replace(',', '')
 
-        # SET index row
-        set_match = re.search(r'SET\s+([\d,]+\.\d+).*?([\d,]+\.\d+)', text)
-        if set_match:
-            data_2d["live_set"] = set_match.group(1).replace(",", "")
-            data_2d["live_value"] = set_match.group(2).replace(",", "")
-
-        # Result
+        # 2D Result တွက်ချက်ခြင်း
         if data_2d["live_set"] != "-" and data_2d["live_value"] != "-":
-            s = data_2d["live_set"]
-            v = data_2d["live_value"]
-            data_2d["main_result"] = s[-1] + v.split(".")[0][-1]
+            s, v = data_2d["live_set"], data_2d["live_value"]
+            data_2d["main_result"] = s[-1] + v.split('.')[0][-1]
+    except: pass
 
-    except Exception as e:
-        print("SET Error:", e)
-
-    # ---------- GLO ----------
+    # --- 3D Scraping (GLO - Exact HTML Target) ---
     try:
-        r = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
-        soup = BeautifulSoup(r.text, "html.parser")
-        text = soup.get_text(" ", strip=True)
-
-        prize = re.search(r'(\d{6})', text)
-        if prize:
-            number = prize.group(1)
-            last_draw["first_prize"] = number
-            last_draw["result"] = number[-3:]
-
-    except Exception as e:
-        print("GLO Error:", e)
+        res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
+        soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
+        
+        # ၄။ 3D Date (col-12 col-md-6 col-lg-8 ထဲမှ h2)
+        date_container = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
+        if date_container:
+            h2_tag = date_container.find("h2")
+            if h2_tag:
+                last_draw["date"] = h2_tag.get_text(strip=True).replace("Draw dated", "").strip()
+            
+        # ၅။ First Prize (col-12 d-flex flex-column flex-md-row အောက်ရှိ award1-item-sub)
+        prize_container = soup_3d.find("div", class_="col-12 d-flex flex-column flex-md-row")
+        if prize_container:
+            award_p = prize_container.find("p", class_="award1-item-sub")
+            if award_p:
+                val = "".join(filter(str.isdigit, award_p.get_text(strip=True)))
+                if len(val) >= 6:
+                    last_draw["first_prize"] = val
+                    last_draw["result"] = val[-3:]
+    except: pass
 
     return data_2d, last_draw
 
-
-# ---------------- Loop ----------------
 def scraper_loop():
+    print(">>> Scraper v22 (Final Precise Fix) Started...")
     while True:
-        try:
+        if firebase_admin._apps:
             d2, d3 = get_live_data()
-
-            db.reference("live_2d").update(d2)
-            db.reference("result_3d/last_draw").update(d3)
-
-            print("Updated:", d2["main_result"], d3["result"])
-
-        except Exception as e:
-            print("Loop Error:", e)
-
+            try:
+                db.reference('live_2d').update(d2)
+                db.reference('result_3d/last_draw').update(d3)
+                print(f">>> Updated: {d2['update_time']} | Status: {d2['market_status']}")
+            except Exception as e:
+                print(f">>> FB Error: {e}")
         time.sleep(20)
 
+if initialize_firebase():
+    threading.Thread(target=scraper_loop, daemon=True).start()
 
-# ---------------- Flask ----------------
 @app.route('/')
-def home():
-    return "Scraper Running", 200
+def home(): return "Scraper v22 Active", 200
 
-
-# ---------------- Main ----------------
 if __name__ == "__main__":
-    if initialize_firebase():
-        threading.Thread(target=scraper_loop, daemon=True).start()
-
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
