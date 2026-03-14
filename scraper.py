@@ -11,7 +11,7 @@ from firebase_admin import credentials, db
 from flask import Flask
 
 app = Flask(__name__)
-os.environ['PYTHONUNBUFFERED'] = "1" # Logs များ ချက်ချင်းတက်လာစေရန်
+os.environ['PYTHONUNBUFFERED'] = "1"
 mm_tz = pytz.timezone('Asia/Yangon')
 
 def initialize_firebase():
@@ -33,9 +33,7 @@ def get_live_data():
     data_2d = {
         "update_time": "-",
         "market_status": "Waiting",
-        "live_set": "-",
-        "live_value": "-",
-        "main_result": "--"
+        "live_set": "-", "live_value": "-", "main_result": "--"
     }
     last_draw = {"date": "-", "first_prize": "-", "result": "-"}
     
@@ -46,65 +44,66 @@ def get_live_data():
         res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
-        # ၁။ Market Status (မြှားအစိမ်းရောင်နေရာ)
-        status_tag = soup_2d.find("div", class_="text-black")
-        if status_tag and status_tag.find("span"):
-            data_2d["market_status"] = status_tag.find("span").get_text(strip=True)
+        # ၁။ Market Status နှင့် Update Time
+        # raw-html class ပါသော div အောက်ရှိ div များကို ရှာပါမည်
+        parent_div = soup_2d.select_one(".d-flex.justify-content-between.justify-content-md-start.fs-12px.raw-html")
+        if parent_div:
+            child_divs = parent_div.find_all("div", recursive=False)
+            if len(child_divs) >= 2:
+                # ပထမ div (text-black) ထဲက market_status ယူခြင်း
+                status_span = child_divs[0].find("span")
+                if status_span:
+                    data_2d["market_status"] = status_span.get_text(strip=True)
+                
+                # ဒုတိယ div ထဲက update_time ယူခြင်း (မြှားအဝါရောင်နေရာ)
+                time_text = child_divs[1].get_text(strip=True)
+                data_2d["update_time"] = time_text.replace("Last updated", "").strip()
 
-        # ၂။ Update Time (မြှားအဝါရောင်နေရာ)
-        time_div1 = soup_2d.find("div", class_="d-flex justify-content-between justify-content-md-start fs-12px raw-html")
-        if time_div = time_div1.find(string=lambda text: "Last updated" in text if text else False)
-            if time_div:
-                data_2d["update_time"] = time_div.strip().replace("Last updated", "").strip()
-
-        # ၃။ Live SET (SVG ပါဝင်သော Div ထဲမှ)
+        # ၂။ Live SET (SVG ပါသော div ထဲမှ)
         set_container = soup_2d.find("div", class_="d-flex justify-content-between")
         if set_container and set_container.find("svg"):
             set_val = set_container.find("span").get_text(strip=True).replace(',', '')
             data_2d["live_set"] = set_val
 
-        # ၄။ Live Value (aria-colindex="5" ပါသော TD ထဲမှ)
-        val_td = soup_2d.find('tr', {'indexselected': '0'})
+        # ၃။ Live Value (aria-colindex="5" ပါသော td ထဲမှ)
+        val_td = soup_2d.find("td", {"aria-colindex": "5"})
         if val_td:
-            if val_tda = val_td.find('td', {'aria-colindex': '5'})
-            val_text = val_tda.get_text(strip=True).replace(',', '')
+            val_text = val_td.get_text(strip=True).replace(',', '')
             data_2d["live_value"] = val_text
 
-        # ၅။ 2D Result တွက်ချက်ခြင်း
+        # ၄။ 2D Result တွက်ချက်ခြင်း
         if data_2d["live_set"] != "-" and data_2d["live_value"] != "-":
-            s = data_2d["live_set"]
-            v = data_2d["live_value"]
+            s, v = data_2d["live_set"], data_2d["live_value"]
             data_2d["main_result"] = s[-1] + v.split('.')[0][-1]
-
-    except Exception as e:
-        print(f">>> 2D Error: {e}")
+    except: pass
 
     # --- 3D Scraping (GLO) ---
     try:
         res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
         soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
         
-        # Date: "Draw dated March 1, 2026" မှ "March 1, 2026" ကိုသာယူခြင်း
-        h2_div = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
-            h2_date = soup_3d.find('h2')
-            if h2_date:
-                date_text = h2_date.get_text(strip=True).replace("Draw dated", "").strip()
-                last_draw["date"] = date_text
+        # ၅။ Date (col-12 class ပါသော div ထဲမှ ဒုတိယမြောက် h2)
+        date_div = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
+        if date_div:
+            target_h2 = date_div.find("h2")
+            if target_h2:
+                last_draw["date"] = target_h2.get_text(strip=True).replace("Draw dated", "").strip()
             
-        # First Prize & 3D Result
-        award_p = soup_3d.select_one(".award1-item p.award1-item-sub")
-        if award_p:
-            clean_prize = "".join(filter(str.isdigit, award_p.get_text(strip=True)))
-            if len(clean_prize) >= 6:
-                last_draw["first_prize"] = clean_prize
-                last_draw["result"] = clean_prize[-3:]
-    except Exception as e:
-        print(f">>> 3D Error: {e}")
+        # ၆။ First Prize (col-12 d-flex flex-column... ထဲမှ)
+        prize_container = soup_3d.find("div", class_="col-12 d-flex flex-column flex-md-row")
+        if prize_container:
+            award_p = prize_container.find("p", class_="award1-item-sub")
+            if award_p:
+                clean_prize = "".join(filter(str.isdigit, award_p.get_text(strip=True)))
+                if len(clean_prize) >= 6:
+                    last_draw["first_prize"] = clean_prize
+                    last_draw["result"] = clean_prize[-3:]
+    except: pass
 
     return data_2d, last_draw
 
 def scraper_loop():
-    print(">>> Scraper v18 (Exact Structure Fix) Started...")
+    print(">>> Scraper v19 (Tag-Specific Target) Started...")
     while True:
         if firebase_admin._apps:
             d2, d3 = get_live_data()
@@ -120,7 +119,7 @@ if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home(): return "Scraper v18 Active", 200
+def home(): return "Scraper v19 Active", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
