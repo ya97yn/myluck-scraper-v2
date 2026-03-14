@@ -33,76 +33,83 @@ def get_live_data():
     data_2d = {
         "update_time": "-",
         "market_status": "Waiting",
-        "live_set": "-", "live_value": "-", "main_result": "--"
+        "live_set": "-",
+        "live_value": "-",
+        "main_result": "--"
     }
-    last_draw = {"date": "-", "first_prize": "-", "result": "-"}
-    
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-    # --- 2D Scraping (SET Home) ---
+    last_draw = {
+        "date": "-",
+        "first_prize": "-",
+        "result": "-"
+    }
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0'
+    }
+
+    # ---------------- 2D SET ----------------
     try:
         res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
-        
-        # ၁။ Market Status (မြှားအစိမ်းရောင်နေရာ)
-        status_div = soup_2d.find("div", class_="text-black")
-        if status_div:
-            status_span = status_div.find("span")
-            if status_span:
-                data_2d["market_status"] = status_span.get_text(strip=True)
+        text = soup_2d.get_text(" ", strip=True)
 
-        # ၂။ Update Time (မြှားအဝါရောင်နေရာ - "Last update" စာသားဖယ်ထုတ်ခြင်း)
-        # raw-html class ပါသော parent div ထဲက ဒုတိယမြောက် div ကို ယူပါမည်
-        parent_raw = soup_2d.select_one(".raw-html")
-        if parent_raw:
-            all_divs = parent_raw.find_all("div", recursive=False)
-            if len(all_divs) >= 2:
-                time_raw = all_divs[1].get_text(strip=True)
-                # စာသားထဲမှ ရှေ့ဆက်များကို အကုန်ဖယ်ထုတ်ပါသည်
-                for word in ["Last updated", "Last update"]:
-                    time_raw = time_raw.replace(word, "")
-                data_2d["update_time"] = time_raw.strip()
+        # Market Status
+        if "Market Status" in text:
+            idx = text.find("Market Status")
+            data_2d["market_status"] = text[idx:idx+50].split(":")[-1].split()[0]
 
-        # ၃။ Live SET & Value (tr indexselected="0" မှ ယူခြင်း)
-        row = soup_2d.find("tr", {"indexselected": "0"})
-        if row:
-            # Live SET
-            c2 = row.find("td", {"aria-colindex": "2"})
-            if c2: data_2d["live_set"] = c2.get_text(strip=True).replace(',', '')
-            # Live Value
-            c5 = row.find("td", {"aria-colindex": "5"})
-            if c5: data_2d["live_value"] = c5.get_text(strip=True).replace(',', '')
+        # Update Time
+        if "Last Update" in text:
+            idx = text.find("Last Update")
+            update = text[idx:idx+40]
+            data_2d["update_time"] = update.replace("Last Update", "").replace(":", "").strip()
 
-        # 2D Result တွက်ချက်ခြင်း
+        # SET Index Value
+        import re
+        match_set = re.search(r'SET Index\s+([\d,]+\.\d+)', text)
+        if match_set:
+            data_2d["live_set"] = match_set.group(1).replace(",", "")
+
+        # Trading Value
+        match_val = re.search(r'Value\s+\(M.Baht\)\s+([\d,]+\.\d+)', text)
+        if match_val:
+            data_2d["live_value"] = match_val.group(1).replace(",", "")
+
+        # 2D Result
         if data_2d["live_set"] != "-" and data_2d["live_value"] != "-":
-            s, v = data_2d["live_set"], data_2d["live_value"]
+            s = data_2d["live_set"]
+            v = data_2d["live_value"]
             data_2d["main_result"] = s[-1] + v.split('.')[0][-1]
-    except: pass
 
-    # --- 3D Scraping (GLO - Exact HTML Target) ---
+    except Exception as e:
+        print("2D Error:", e)
+
+    # ---------------- 3D GLO ----------------
     try:
         res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
         soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
-        
-        # ၄။ 3D Date (col-12 col-md-6 col-lg-8 ထဲမှ h2)
-        date_container = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
-        if date_container:
-            h2_tag = date_container.find("h2")
-            if h2_tag:
-                last_draw["date"] = h2_tag.get_text(strip=True).replace("Draw dated", "").strip()
-            
-        # ၅။ First Prize (col-12 d-flex flex-column flex-md-row အောက်ရှိ award1-item-sub)
-        prize_container = soup_3d.find("div", class_="col-12 d-flex flex-column flex-md-row")
-        if prize_container:
-            award_p = prize_container.find("p", class_="award1-item-sub")
-            if award_p:
-                val = "".join(filter(str.isdigit, award_p.get_text(strip=True)))
-                if len(val) >= 6:
-                    last_draw["first_prize"] = val
-                    last_draw["result"] = val[-3:]
-    except: pass
+        text = soup_3d.get_text(" ", strip=True)
+
+        import re
+
+        # First Prize 6 digit
+        prize = re.search(r'รางวัลที่ 1\s+.*?\s+(\d{6})', text)
+        if prize:
+            number = prize.group(1)
+            last_draw["first_prize"] = number
+            last_draw["result"] = number[-3:]
+
+        # Draw Date
+        date = re.search(r'วันที่\s+([0-9/]+)', text)
+        if date:
+            last_draw["date"] = date.group(1)
+
+    except Exception as e:
+        print("3D Error:", e)
 
     return data_2d, last_draw
+
 
 def scraper_loop():
     print(">>> Scraper v22 (Final Precise Fix) Started...")
