@@ -40,12 +40,12 @@ def get_live_data():
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
     try:
-        res_2d = requests.get("https://www.set.or.th/en/market/product/stock/overview", headers=headers, timeout=15)
+        res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
         # ၁။ Market Status (မြှားအစိမ်းရောင်နေရာ)
         # class="market-status" အောက်ရှိ span ထဲမှ Closed/Pre-Open ကို ယူပါမည်
-        status_container = soup_2d.find(class_="market-status")
+        status_container = soup_2d.find(class_="market-status pb-2 pb-md-2 pt-md-2 pb-lg-3 pt-lg-2 py-xl-3")
         if status_container:
             status_span = status_container.find("span")
             if status_span:
@@ -53,10 +53,10 @@ def get_live_data():
 
         # ၂။ Update Time (မြှားအဝါရောင်နေရာ)
         # Last updated စာသားပါသော div ထဲမှ အချိန်ကို ယူပါမည်
-        time_div = soup_2d.find(string=lambda text: "Last updated" in text if text else False)
+        time_div = soup_2d.find(string=lambda text: "Last update" in text if text else False)
         if time_div:
             # "Last updated March 14, 2026, 03:20:14." ထဲမှ အချိန်အပိုင်းအစကို ယူခြင်း
-            raw_time = time_div.strip().replace("Last updated", "").strip()
+            raw_time = time_div.strip().replace("Last update", "").strip()
             data_2d["update_time"] = raw_time
 
         # ၃။ SET & Value Data
