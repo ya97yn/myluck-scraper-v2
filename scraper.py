@@ -64,7 +64,8 @@ def get_live_data():
         row = soup_2d.find('tr', {'indexselected': '0'})
         if row:
             c2 = row.find('td', {'aria-colindex': '2'})
-            if c2_span = c2.find("span")
+                if c2:
+                    c2_span = c2.find("span")
             c8 = row.find('td', {'aria-colindex': '5'})
             
             if c2 and c8:
