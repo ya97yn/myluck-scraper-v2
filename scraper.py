@@ -52,14 +52,15 @@ def get_live_data():
                 data_2d["market_status"] = status_span.get_text(strip=True)
 
         # ၂။ Update Time (မြှားအဝါရောင်နေရာ)
-        # Last updated စာသားပါသော div ထဲမှ အချိန်ကို ယူပါမည်
-        time_div = soup_2d.find(string=lambda text: "Last update" in text if text else False)
+        # Last စာသားပါသော div ထဲမှ အချိန်ကို ယူပါမည်
+        time_div = soup_2d.find(string=lambda text: "Last" in text if text else False)
         if time_div:
             # "Last updated March 14, 2026, 03:20:14." ထဲမှ အချိန်အပိုင်းအစကို ယူခြင်း
-            raw_time = time_div.strip().replace("Last update", "").strip()
+            raw_time = time_div.strip().replace("Last", "").strip()
             data_2d["update_time"] = raw_time
 
         # ၃။ SET & Value Data
+        res_2d = requests.get("https://www.set.or.th/en/market/product/stock/overview", headers=headers, timeout=15)
         row = soup_2d.find('tr', {'indexselected': '0'})
         if row:
             c2 = row.find('td', {'aria-colindex': '2'})
