@@ -68,8 +68,8 @@ def get_live_data():
                     c2_span = c2.find("span")
             c8 = row.find('td', {'aria-colindex': '5'})
             
-            if c2 and c8:
-                sv = c2.get_text(strip=True).replace(',', '')
+            if c2_span and c8:
+                sv = c2_span.get_text(strip=True).replace(',', '')
                 vv = c8.get_text(strip=True).replace(',', '')
                 if sv and vv and sv != "-":
                     data_2d.update({"live_set": sv, "live_value": vv})
