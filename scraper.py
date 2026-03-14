@@ -41,24 +41,23 @@ def get_live_data():
 
     # --- 2D Scraping (SET Home) ---
     try:
-        res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
+        res_2d = requests.get("https://www.set.or.th/en/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
-        # ၁။ Market Status နှင့် Update Time (စာသားအတိအကျ စစ်ထုတ်ခြင်း)
-        parent_div = soup_2d.select_one(".raw-html")
+       ၁။ Market Status နှင့် Update Time
+        # raw-html class ပါသော div အောက်ရှိ div များကို ရှာပါမည်
+        parent_div = soup_2d.select_one(".d-flex.justify-content-between.justify-content-md-start.fs-12px.raw-html")
         if parent_div:
             child_divs = parent_div.find_all("div", recursive=False)
             if len(child_divs) >= 2:
-                # Market Status ယူခြင်း
+                # ပထမ div (text-black) ထဲက market_status ယူခြင်း
                 status_span = child_divs[0].find("span")
                 if status_span:
                     data_2d["market_status"] = status_span.get_text(strip=True)
                 
-                # Update Time (Last update/Last updated နှစ်မျိုးလုံးကို ဖယ်ထုတ်ခြင်း)
+                # ဒုတိယ div ထဲက update_time ယူခြင်း (မြှားအဝါရောင်နေရာ)
                 time_text = child_divs[1].get_text(strip=True)
-                for clean_word in ["Last updated", "Last update"]:
-                    time_text = time_text.replace(clean_word, "")
-                data_2d["update_time"] = time_text.strip()
+                data_2d["update_time"] = time_text.replace("Last updated", "").strip()
 
         # ၂။ Live SET & Value (tr indexselected="0" အောက်မှ ယူခြင်း)
         target_row = soup_2d.find("tr", {"indexselected": "0"})
@@ -88,7 +87,7 @@ def get_live_data():
         # "text" class ပါသော div ကို ကျော်ပြီး သတ်မှတ်ထားသော div ထဲမှ h2 ကိုယူပါသည်
         target_div = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
         if target_div:
-            date_h2 = target_div.find("h2")
+            date_h2 = target_div.find("h2", data-v-4d58a094)
             if date_h2:
                 last_draw["date"] = date_h2.get_text(strip=True).replace("Draw dated", "").strip()
             
