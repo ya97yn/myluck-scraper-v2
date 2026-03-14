@@ -44,7 +44,7 @@ def get_live_data():
         res_2d = requests.get("https://www.set.or.th/en/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
-       ၁။ Market Status နှင့် Update Time
+       #Market Status နှင့် Update Time
         # raw-html class ပါသော div အောက်ရှိ div များကို ရှာပါမည်
         parent_div = soup_2d.select_one(".d-flex.justify-content-between.justify-content-md-start.fs-12px.raw-html")
         if parent_div:
