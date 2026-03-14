@@ -53,18 +53,20 @@ def get_live_data():
 
         # ၂။ Update Time (မြှားအဝါရောင်နေရာ)
         # Last စာသားပါသော div ထဲမှ အချိန်ကို ယူပါမည်
-        time_div = soup_2d.find(string=lambda text: "Last" in text if text else False)
+        time_div = soup_2d.find(class_="market-status pb-2 pb-md-2 pt-md-2 pb-lg-3 pt-lg-2 py-xl-3")
         if time_div:
             # "Last updated March 14, 2026, 03:20:14." ထဲမှ အချိန်အပိုင်းအစကို ယူခြင်း
             raw_time = time_div.strip().replace("Last", "").strip()
             data_2d["update_time"] = raw_time
 
         # ၃။ SET & Value Data
-        res_2d = requests.get("https://www.set.or.th/en/market/product/stock/overview", headers=headers, timeout=15)
+        
         row = soup_2d.find('tr', {'indexselected': '0'})
         if row:
             c2 = row.find('td', {'aria-colindex': '2'})
-            c8 = row.find('td', {'aria-colindex': '8'})
+            if c2_span =c2_container.find("span")
+            c8 = row.find('td', {'aria-colindex': '5'})
+            
             if c2 and c8:
                 sv = c2.get_text(strip=True).replace(',', '')
                 vv = c8.get_text(strip=True).replace(',', '')
@@ -82,7 +84,7 @@ def get_live_data():
         if h2_date: last_draw["date"] = h2_date.get_text(strip=True)
         award_div = soup_3d.find('div', class_='award1-item')
         if award_div:
-            p_tag = award_div.find('p', class_='award1-item-sub')
+            font_tag = award_div.find('font','font','p', class_='award1-item-sub')
             if p_tag:
                 clean_prize = "".join(filter(str.isdigit, p_tag.get_text(strip=True)))
                 if len(clean_prize) >= 6:
