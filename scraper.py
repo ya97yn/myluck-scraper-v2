@@ -63,13 +63,11 @@ def get_live_data():
         
         row = soup_2d.find('tr', {'indexselected': '0'})
         if row:
-            c2 = row.find('td', {'aria-colindex': '2'})
-                if c2:
-                    c2_span = c2.find("span")
+            c2 = row.find('span')
             c8 = row.find('td', {'aria-colindex': '5'})
             
             if c2_span and c8:
-                sv = c2_span.get_text(strip=True).replace(',', '')
+                sv = c2.get_text(strip=True).replace(',', '')
                 vv = c8.get_text(strip=True).replace(',', '')
                 if sv and vv and sv != "-":
                     data_2d.update({"live_set": sv, "live_value": vv})
