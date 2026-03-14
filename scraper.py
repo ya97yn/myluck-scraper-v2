@@ -52,9 +52,10 @@ def get_live_data():
             data_2d["market_status"] = status_tag.find("span").get_text(strip=True)
 
         # ၂။ Update Time (မြှားအဝါရောင်နေရာ)
-        time_div = soup_2d.find(string=lambda text: "Last updated" in text if text else False)
-        if time_div:
-            data_2d["update_time"] = time_div.strip().replace("Last updated", "").strip()
+        time_div1 = soup_2d.find("div", class_="d-flex justify-content-between justify-content-md-start fs-12px raw-html")
+        if time_div = time_div1.find(string=lambda text: "Last updated" in text if text else False)
+            if time_div:
+                data_2d["update_time"] = time_div.strip().replace("Last updated", "").strip()
 
         # ၃။ Live SET (SVG ပါဝင်သော Div ထဲမှ)
         set_container = soup_2d.find("div", class_="d-flex justify-content-between")
@@ -63,9 +64,10 @@ def get_live_data():
             data_2d["live_set"] = set_val
 
         # ၄။ Live Value (aria-colindex="5" ပါသော TD ထဲမှ)
-        val_td = soup_2d.find("td", {"aria-colindex": "5"})
+        val_td = soup_2d.find('tr', {'indexselected': '0'})
         if val_td:
-            val_text = val_td.get_text(strip=True).replace(',', '')
+            if val_tda = val_td.find('td', {'aria-colindex': '5'})
+            val_text = val_tda.get_text(strip=True).replace(',', '')
             data_2d["live_value"] = val_text
 
         # ၅။ 2D Result တွက်ချက်ခြင်း
@@ -83,10 +85,11 @@ def get_live_data():
         soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
         
         # Date: "Draw dated March 1, 2026" မှ "March 1, 2026" ကိုသာယူခြင်း
-        h2_date = soup_3d.find('h2', {'data-v-4d58a094': True})
-        if h2_date:
-            date_text = h2_date.get_text(strip=True).replace("Draw dated", "").strip()
-            last_draw["date"] = date_text
+        h2_div = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
+            h2_date = soup_3d.find('h2')
+            if h2_date:
+                date_text = h2_date.get_text(strip=True).replace("Draw dated", "").strip()
+                last_draw["date"] = date_text
             
         # First Prize & 3D Result
         award_p = soup_3d.select_one(".award1-item p.award1-item-sub")
