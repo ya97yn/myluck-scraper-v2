@@ -41,36 +41,37 @@ def get_live_data():
 
     # --- 2D Scraping (SET Home) ---
     try:
-        res_2d = requests.get("https://www.set.or.th/en/home", headers=headers, timeout=15)
+        res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
-       #Market Status နှင့် Update Time
-        # raw-html class ပါသော div အောက်ရှိ div များကို ရှာပါမည်
-        parent_div = soup_2d.select_one(".d-flex.justify-content-between.justify-content-md-start.fs-12px.raw-html")
-        if parent_div:
-            child_divs = parent_div.find_all("div", recursive=False)
-            if len(child_divs) >= 2:
-                # ပထမ div (text-black) ထဲက market_status ယူခြင်း
-                status_span = child_divs[0].find("span")
-                if status_span:
-                    data_2d["market_status"] = status_span.get_text(strip=True)
-                
-                # ဒုတိယ div ထဲက update_time ယူခြင်း (မြှားအဝါရောင်နေရာ)
-                time_text = child_divs[1].get_text(strip=True)
-                data_2d["update_time"] = time_text.replace("Last updated", "").strip()
+        # ၁။ Market Status (မြှားအစိမ်းရောင်နေရာ)
+        status_div = soup_2d.find("div", class_="text-black")
+        if status_div:
+            status_span = status_div.find("span")
+            if status_span:
+                data_2d["market_status"] = status_span.get_text(strip=True)
 
-        # ၂။ Live SET & Value (tr indexselected="0" အောက်မှ ယူခြင်း)
-        target_row = soup_2d.find("tr", {"indexselected": "0"})
-        if target_row:
-            # Live SET (aria-colindex="2" သို့မဟုတ် SVG ပါသော td)
-            set_td = target_row.find("td", {"aria-colindex": "2"})
-            if set_td:
-                data_2d["live_set"] = set_td.get_text(strip=True).replace(',', '')
-            
-            # Live Value (aria-colindex="5" အောက်မှ ယူခြင်း)
-            val_td = target_row.find("td", {"aria-colindex": "5"})
-            if val_td:
-                data_2d["live_value"] = val_td.get_text(strip=True).replace(',', '')
+        # ၂။ Update Time (မြှားအဝါရောင်နေရာ - "Last update" စာသားဖယ်ထုတ်ခြင်း)
+        # raw-html class ပါသော parent div ထဲက ဒုတိယမြောက် div ကို ယူပါမည်
+        parent_raw = soup_2d.select_one(".raw-html")
+        if parent_raw:
+            all_divs = parent_raw.find_all("div", recursive=False)
+            if len(all_divs) >= 2:
+                time_raw = all_divs[1].get_text(strip=True)
+                # စာသားထဲမှ ရှေ့ဆက်များကို အကုန်ဖယ်ထုတ်ပါသည်
+                for word in ["Last updated", "Last update"]:
+                    time_raw = time_raw.replace(word, "")
+                data_2d["update_time"] = time_raw.strip()
+
+        # ၃။ Live SET & Value (tr indexselected="0" မှ ယူခြင်း)
+        row = soup_2d.find("tr", {"indexselected": "0"})
+        if row:
+            # Live SET
+            c2 = row.find("td", {"aria-colindex": "2"})
+            if c2: data_2d["live_set"] = c2.get_text(strip=True).replace(',', '')
+            # Live Value
+            c5 = row.find("td", {"aria-colindex": "5"})
+            if c5: data_2d["live_value"] = c5.get_text(strip=True).replace(',', '')
 
         # 2D Result တွက်ချက်ခြင်း
         if data_2d["live_set"] != "-" and data_2d["live_value"] != "-":
@@ -78,35 +79,33 @@ def get_live_data():
             data_2d["main_result"] = s[-1] + v.split('.')[0][-1]
     except: pass
 
-    # --- 3D Scraping (GLO) ---
+    # --- 3D Scraping (GLO - Exact HTML Target) ---
     try:
         res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
         soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
         
-        # ၃။ Date (col-12 col-md-6 col-lg-8 ထဲမှ h2 ကို တိုက်ရိုက်ပစ်မှတ်ထားခြင်း)
-        # "text" class ပါသော div ကို ကျော်ပြီး သတ်မှတ်ထားသော div ထဲမှ h2 ကိုယူပါသည်
-        target_div = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
-        if target_div:
-            date_h2 = target_div.find("h2", data-v-4d58a094)
-            if date_h2:
-                last_draw["date"] = date_h2.get_text(strip=True).replace("Draw dated", "").strip()
+        # ၄။ 3D Date (col-12 col-md-6 col-lg-8 ထဲမှ h2)
+        date_container = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
+        if date_container:
+            h2_tag = date_container.find("h2")
+            if h2_tag:
+                last_draw["date"] = h2_tag.get_text(strip=True).replace("Draw dated", "").strip()
             
-        # ၄။ First Prize (ထပ်ဆင့် div ၃ ခုအောက်ရှိ award1-item-sub ကို ရှာခြင်း)
-        prize_root = soup_3d.find("div", class_="col-12 d-flex flex-column flex-md-row")
-        if prize_root:
-            # award1-item-sub class ကို တိုက်ရိုက်ရှာဖွေခြင်း
-            award_p = prize_root.find("p", class_="award1-item-sub")
+        # ၅။ First Prize (col-12 d-flex flex-column flex-md-row အောက်ရှိ award1-item-sub)
+        prize_container = soup_3d.find("div", class_="col-12 d-flex flex-column flex-md-row")
+        if prize_container:
+            award_p = prize_container.find("p", class_="award1-item-sub")
             if award_p:
-                clean_prize = "".join(filter(str.isdigit, award_p.get_text(strip=True)))
-                if len(clean_prize) >= 6:
-                    last_draw["first_prize"] = clean_prize
-                    last_draw["result"] = clean_prize[-3:]
+                val = "".join(filter(str.isdigit, award_p.get_text(strip=True)))
+                if len(val) >= 6:
+                    last_draw["first_prize"] = val
+                    last_draw["result"] = val[-3:]
     except: pass
 
     return data_2d, last_draw
 
 def scraper_loop():
-    print(">>> Scraper v21 (Precision Fix) Started...")
+    print(">>> Scraper v22 (Final Precise Fix) Started...")
     while True:
         if firebase_admin._apps:
             d2, d3 = get_live_data()
@@ -122,7 +121,7 @@ if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home(): return "Scraper v21 Active", 200
+def home(): return "Scraper v22 Active", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
