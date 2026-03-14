@@ -41,7 +41,7 @@ def get_live_data():
 
     # --- 2D Scraping (SET Home) ---
     try:
-        res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
+        res_2d = requests.get("https://www.set.or.th/en/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
         # ၁။ Market Status နှင့် Update Time
@@ -66,10 +66,12 @@ def get_live_data():
             data_2d["live_set"] = set_val
 
         # ၃။ Live Value (aria-colindex="5" ပါသော td ထဲမှ)
-        val_td = soup_2d.find("td", {"aria-colindex": "5"})
-        if val_td:
-            val_text = val_td.get_text(strip=True).replace(',', '')
-            data_2d["live_value"] = val_text
+        val_tr = soup_2d.fing('tr', {'indexselected': '0'})
+        if val_tr:
+            val_td =  val_tr.find("td", {"aria-colindex": "5"})
+            if val_td:
+                val_text = val_td.get_text(strip=True).replace(',', '')
+                data_2d["live_value"] = val_text
 
         # ၄။ 2D Result တွက်ချက်ခြင်း
         if data_2d["live_set"] != "-" and data_2d["live_value"] != "-":
