@@ -11,7 +11,6 @@ from firebase_admin import credentials, db
 from flask import Flask
 
 app = Flask(__name__)
-# Logs များ ချက်ချင်းပေါ်လာစေရန်
 os.environ['PYTHONUNBUFFERED'] = "1"
 mm_tz = pytz.timezone('Asia/Yangon')
 
@@ -31,11 +30,8 @@ def initialize_firebase():
     return firebase_admin._apps is not None
 
 def get_live_data():
-    now_mm = datetime.now(mm_tz)
-    current_time = now_mm.strftime("%d %b %Y %H:%M:%S")
-    
     data_2d = {
-        "update_time": current_time,
+        "update_time": "-",
         "market_status": "Waiting",
         "live_set": "-", "live_value": "-", "main_result": "--"
     }
@@ -43,17 +39,27 @@ def get_live_data():
     
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-    # --- 2D Scraping ---
     try:
         res_2d = requests.get("https://www.set.or.th/en/market/product/stock/overview", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
-        # Market Status ကို Website မှ အတိအကျဖတ်ခြင်း
-        status_tag = soup_2d.select_one(".market-status, [class*='market-status']")
-        if status_tag:
-            # "Market Status: Pre-Open2" ထဲမှ "Pre-Open2" ကိုသာ ယူပါမည်
-            data_2d["market_status"] = status_tag.get_text(strip=True).replace("Market Status:", "").strip()
+        # ၁။ Market Status (မြှားအစိမ်းရောင်နေရာ)
+        # class="market-status" အောက်ရှိ span ထဲမှ Closed/Pre-Open ကို ယူပါမည်
+        status_container = soup_2d.find(class_="market-status")
+        if status_container:
+            status_span = status_container.find("span")
+            if status_span:
+                data_2d["market_status"] = status_span.get_text(strip=True)
 
+        # ၂။ Update Time (မြှားအဝါရောင်နေရာ)
+        # Last updated စာသားပါသော div ထဲမှ အချိန်ကို ယူပါမည်
+        time_div = soup_2d.find(string=lambda text: "Last updated" in text if text else False)
+        if time_div:
+            # "Last updated March 14, 2026, 03:20:14." ထဲမှ အချိန်အပိုင်းအစကို ယူခြင်း
+            raw_time = time_div.strip().replace("Last updated", "").strip()
+            data_2d["update_time"] = raw_time
+
+        # ၃။ SET & Value Data
         row = soup_2d.find('tr', {'indexselected': '0'})
         if row:
             c2 = row.find('td', {'aria-colindex': '2'})
@@ -64,7 +70,8 @@ def get_live_data():
                 if sv and vv and sv != "-":
                     data_2d.update({"live_set": sv, "live_value": vv})
                     data_2d["main_result"] = sv[-1] + vv.split('.')[0][-1]
-    except: pass
+    except Exception as e:
+        print(f">>> Scrape Error: {e}")
 
     # --- 3D Scraping ---
     try:
@@ -72,7 +79,6 @@ def get_live_data():
         soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
         h2_date = soup_3d.find('h2', {'data-v-4d58a094': True})
         if h2_date: last_draw["date"] = h2_date.get_text(strip=True)
-            
         award_div = soup_3d.find('div', class_='award1-item')
         if award_div:
             p_tag = award_div.find('p', class_='award1-item-sub')
@@ -86,7 +92,7 @@ def get_live_data():
     return data_2d, last_draw
 
 def scraper_loop():
-    print(">>> Scraper v16 (Final Status Fix) Started...")
+    print(">>> Scraper v17 (Arrow Fix) Started...")
     while True:
         if firebase_admin._apps:
             d2, d3 = get_live_data()
@@ -102,9 +108,8 @@ if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home(): return "Scraper v16 is Running", 200
+def home(): return "Scraper v17 Active", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-    
