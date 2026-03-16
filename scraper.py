@@ -30,39 +30,32 @@ def initialize_firebase():
     return firebase_admin._apps is not None
 
 def get_live_data():
+    # မြန်မာစံတော်ချိန်ကို ယူခြင်း
+    now_mm = datetime.now(mm_tz)
+    
     data_2d = {
-        "update_time": "-",
+        "update_time": now_mm.strftime('%I:%M:%S %p'), # မြန်မာစံတော်ချိန်ပြောင်းလဲခြင်း
         "market_status": "Waiting",
-        "live_set": "-", "live_value": "-", "main_result": "--"
+        "live_set": "-", 
+        "live_value": "-", 
+        "main_result": "--",
+        "date": now_mm.strftime('%Y-%m-%d')
     }
-    last_draw = {"date": "-", "first_prize": "-", "result": "-"}
+    
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-    # --- 2D Scraping (SET Home) ---
     try:
         res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
-        # ၁။ Market Status (မြှားအစိမ်းရောင်နေရာ)
+        # ၁။ Market Status
         status_parent = soup_2d.find("div", class_="text-black")
         if status_parent:
             status_span = status_parent.find("span")
             if status_span:
                 data_2d["market_status"] = status_span.get_text(strip=True)
 
-        # ၂။ Update Time (မြှားအဝါရောင်နေရာ)
-        # raw-html class ပါသော div ထဲမှ ဒုတိယမြောက် div ကို တိုက်ရိုက်ယူပါသည်
-        parent_raw = soup_2d.select_one(".raw-html")
-        if parent_raw:
-            all_divs = parent_raw.find_all("div", recursive=False)
-            if len(all_divs) >= 2:
-                time_raw = all_divs[1].get_text(strip=True)
-                # "Last updated March 14, 2026, 03:20:14." ထဲမှ အချိန်အပိုင်းအစကိုသာယူခြင်း
-                for word in ["Last updated", "Last update"]:
-                    time_raw = time_raw.replace(word, "")
-                data_2d["update_time"] = time_raw.strip().strip('.')
-
-        # ၃။ Live SET & Value (tr indexselected="0" မှ ယူခြင်း)
+        # ၂။ Live SET & Value
         row = soup_2d.find("tr", {"indexselected": "0"})
         if row:
             c2 = row.find("td", {"aria-colindex": "2"})
@@ -74,54 +67,66 @@ def get_live_data():
         if data_2d["live_set"] != "-" and data_2d["live_value"] != "-":
             s, v = data_2d["live_set"], data_2d["live_value"]
             data_2d["main_result"] = s[-1] + v.split('.')[0][-1]
-    except: pass
-
-    # --- 3D Scraping (GLO - Exact Path Fix) ---
-    try:
-        res_3d = requests.get("https://www.glo.or.th/home-page", headers=headers, timeout=15)
-        soup_3d = BeautifulSoup(res_3d.text, 'html.parser')
-        
-        # ၄။ Date (col-12 col-md-6 col-lg-8 ထဲမှ h2)
-        date_div = soup_3d.find("div", class_="col-12 col-md-6 col-lg-8")
-        if date_div:
-            h2_date = date_div.find("h2")
-            if h2_date:
-                # "Draw dated March 1, 2026." ထဲမှ "March 1, 2026" ကိုသာယူခြင်း
-                last_draw["date"] = h2_date.get_text(strip=True).replace("Draw dated", "").strip().strip('.')
             
-        # ၅။ First Prize (col-12 d-flex flex-column flex-md-row အောက်ရှိ p)
-        prize_root = soup_3d.find("div", class_="col-12 d-flex flex-column flex-md-row")
-        if prize_root:
-            award_p = prize_root.find("p", class_="award1-item-sub")
-            if award_p:
-                val = "".join(filter(str.isdigit, award_p.get_text(strip=True)))
-                if len(val) >= 6:
-                    last_draw["first_prize"] = val
-                    last_draw["result"] = val[-3:]
-    except: pass
+    except Exception as e:
+        print(f">>> Scraping Error: {e}")
 
-    return data_2d, last_draw
+    return data_2d
 
 def scraper_loop():
-    print(">>> Scraper v23 (Exact Element Fix) Started...")
+    print(">>> Scraper v24 (Custom Logic) Started...")
+    last_saved_result = "" # ထပ်နေတာတွေမသိမ်းမိအောင်
+
     while True:
         if firebase_admin._apps:
-            d2, d3 = get_live_data()
+            d2 = get_live_data()
+            now_mm = datetime.now(mm_tz)
+            current_time_str = now_mm.strftime('%H:%M') # ၂၄ နာရီ format နဲ့ စစ်မယ်
+            today_date = now_mm.strftime('%Y-%m-%d')
+
             try:
+                # ၁။ လက်ရှိ Live Data ကို အမြဲ Update လုပ်မယ်
+                # (Modern/Internet တွေကို Manual ရိုက်ထားတာ မပျက်စေဖို့ update ပဲသုံးပါမယ်)
                 db.reference('live_2d').update(d2)
-                db.reference('result_3d/last_draw').update(d3)
-                # Log တွင် အောင်မြင်မှုရှိမရှိ စစ်ဆေးရန်
-                print(f">>> Updated FB: {d2['update_time']} | 3D Date: {d3['date']}")
+
+                # ၂။ History သိမ်းဆည်းခြင်း (Result ပြောင်းလဲမှသာ သိမ်းမယ်)
+                if d2["main_result"] != "--" and d2["main_result"] != last_saved_result:
+                    history_ref = db.reference(f'history_2d/{today_date}/{now_mm.strftime("%H-%M-%S")}')
+                    history_ref.set(d2)
+                    last_saved_result = d2["main_result"]
+
+                # ၃။ Morning သိမ်းဆည်းခြင်း (12:02 PM)
+                if current_time_str == "12:02":
+                    db.reference('live_2d/Morning').update({
+                        "set": d2["live_set"],
+                        "value": d2["live_value"],
+                        "result": d2["main_result"]
+                    })
+                    print(">>> Morning Data Saved at 12:02 PM")
+
+                # ၄။ Evening သိမ်းဆည်းခြင်း (16:35 PM)
+                if current_time_str == "16:35":
+                    db.reference('live_2d/Evening').update({
+                        "set": d2["live_set"],
+                        "value": d2["live_value"],
+                        "result": d2["main_result"]
+                    })
+                    print(">>> Evening Data Saved at 16:35 PM")
+
+                print(f">>> Updated FB: {d2['update_time']} | Result: {d2['main_result']}")
+
             except Exception as e:
                 print(f">>> FB Update Error: {e}")
-        time.sleep(20)
+        
+        time.sleep(10) # ၂၀ စက္ကန့်တစ်ခါ စစ်ဆေးမယ်
 
 if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home(): return "Scraper v23 is Running Successfully", 200
+def home(): return "Scraper v24 is Running (Custom Logic)", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+    
