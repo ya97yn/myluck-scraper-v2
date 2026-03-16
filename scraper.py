@@ -62,7 +62,7 @@ def get_live_data():
     return data_2d
 
 def scraper_loop():
-    print(">>> Scraper v25 (2dhistory Format Fix) Started...")
+    print(">>> Scraper v26 (Full History Sync) Started...")
     while True:
         if firebase_admin._apps:
             d2 = get_live_data()
@@ -71,7 +71,7 @@ def scraper_loop():
             current_time = now_mm.strftime('%H:%M')
 
             try:
-                # ၁။ လက်ရှိ Live Data ကို Update လုပ်ခြင်း
+                # ၁။ live_2d ကို update အမြဲလုပ်မယ်
                 db.reference('live_2d').update({
                     "live_set": d2["live_set"],
                     "live_value": d2["live_value"],
@@ -81,18 +81,36 @@ def scraper_loop():
                     "date": today_date
                 })
 
-                # ၂။ 2dhistory ထဲသို့ သတ်မှတ်ချိန်အလိုက် သိမ်းဆည်းခြင်း
+                # ၂။ 2dhistory ထဲကို အချိန်အလိုက် ဒေတာကူးယူမယ်
+                # live_2d ထဲက data ကို အရင်ဖတ်မယ် (manual ရိုက်ထားတာ သိချင်လို့)
+                live_ref = db.reference('live_2d').get()
                 history_ref = db.reference(f'2dhistory/{today_date}')
 
-                # Morning Result (12:01 PM)
-                if current_time == "12:01":
+                # --- Morning (9:30 AM) ---
+                if current_time == "09:30":
+                    morning_930 = live_ref.get('morning', {}).get('9:30AM', {})
+                    history_ref.child("9:30AM").update({
+                        "modern": morning_930.get('modern', ""),
+                        "internet": morning_930.get('internet', "")
+                    })
+
+                # --- Morning (12:01 PM) ---
+                elif current_time == "12:01":
                     history_ref.child("12:01PM").update({
                         "set": d2["live_set"],
                         "value": d2["live_value"],
                         "result": d2["main_result"]
                     })
 
-                # Evening Result (16:30 PM - or 4:30PM)
+                # --- Evening (2:00 PM) ---
+                elif current_time == "14:00":
+                    evening_200 = live_ref.get('evening', {}).get('2:00PM', {})
+                    history_ref.child("2:00PM").update({
+                        "modern": evening_200.get('modern', ""),
+                        "internet": evening_200.get('internet', "")
+                    })
+
+                # --- Evening (4:30 PM) ---
                 elif current_time == "16:30":
                     history_ref.child("4:30PM").update({
                         "set": d2["live_set"],
@@ -100,19 +118,10 @@ def scraper_loop():
                         "result": d2["main_result"]
                     })
 
-                # 9:30 AM နဲ့ 2:00 PM အတွက် Manual ရိုက်ရန် နေရာလွတ်ကြိုဖန်တီးခြင်း (မရှိသေးရင်)
-                if current_time == "09:30":
-                    if not history_ref.child("9:30AM").get():
-                        history_ref.child("9:30AM").update({"internet": "", "modern": ""})
-                
-                if current_time == "14:00":
-                    if not history_ref.child("2:00PM").get():
-                        history_ref.child("2:00PM").update({"internet": "", "modern": ""})
-
-                print(f">>> Log: {d2['update_time']} | SET: {d2['live_set']} | 2D: {d2['main_result']}")
+                print(f">>> Sync: {d2['update_time']} | 2D: {d2['main_result']}")
 
             except Exception as e:
-                print(f">>> FB Update Error: {e}")
+                print(f">>> FB Sync Error: {e}")
         
         time.sleep(30)
 
@@ -120,9 +129,9 @@ if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home(): return "Scraper v25 Running - 2dhistory Updated", 200
+def home(): return "Scraper v26 Running - All Sync Logic Added", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-            
+    
