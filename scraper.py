@@ -29,6 +29,22 @@ def initialize_firebase():
             print(f">>> Firebase Init Error: {e}")
     return firebase_admin._apps is not None
 
+def is_thai_holiday(current_date_dt):
+    # စနေ (5) ၊ တနင်္ဂနွေ (6) စစ်ခြင်း
+    if current_date_dt.weekday() >= 5:
+        return True
+    
+    # Firebase မှ holidays ဖတ်ခြင်း
+    try:
+        holidays_data = db.reference(f'holidays/{current_date_dt.year}').get()
+        if holidays_data:
+            formatted_date = current_date_dt.strftime('%d %b') # "17 Mar"
+            for h in holidays_data:
+                if h['date'] == formatted_date:
+                    return True
+    except: pass
+    return False
+
 def get_live_data():
     now_mm = datetime.now(mm_tz)
     data_2d = {
@@ -62,7 +78,7 @@ def get_live_data():
     return data_2d
 
 def scraper_loop():
-    print(">>> Scraper v26 (Full History Sync) Started...")
+    print(">>> Scraper v27 (Holiday Aware & Auto-Reset) Started...")
     while True:
         if firebase_admin._apps:
             d2 = get_live_data()
@@ -71,57 +87,55 @@ def scraper_loop():
             current_time = now_mm.strftime('%H:%M')
 
             try:
-                # ၁။ live_2d ကို update အမြဲလုပ်မယ်
-                db.reference('live_2d').update({
+                # ၁။ မနက် ၉:၀၀ နာရီ Reset & History သိမ်းခြင်း (ရုံးဖွင့်ရက်မှသာ)
+                if current_time == "09:00":
+                    if not is_thai_holiday(now_mm):
+                        live_data = db.reference('live_2d').get()
+                        if live_data and live_data.get('date') != today_date:
+                            old_date = live_data.get('date', 'Unknown')
+                            # History သို့ ရွှေ့ခြင်း
+                            history_payload = {
+                                "9:30AM": live_data.get('morning', {}).get('9:30AM', {"internet": "", "modern": ""}),
+                                "12:01PM": live_data.get('morning', {}).get('12:01PM', {"result": "", "set": "", "value": ""}),
+                                "2:00PM": live_data.get('evening', {}).get('2:00PM', {"internet": "", "modern": ""}),
+                                "4:30PM": live_data.get('evening', {}).get('4:30PM', {"result": "", "set": "", "value": ""})
+                            }
+                            db.reference(f'2dhistory/{old_date}').update(history_payload)
+                            
+                            # Live Data ကို Clear လုပ်ခြင်း
+                            db.reference('live_2d').update({
+                                "date": today_date,
+                                "morning": {"9:30AM": {"internet": "", "modern": ""}, "12:01PM": {"result": "", "set": "", "value": ""}},
+                                "evening": {"2:00PM": {"internet": "", "modern": ""}, "4:30PM": {"result": "", "set": "", "value": ""}}
+                            })
+                            print(f">>> History Saved for {old_date} and Live Data Reset.")
+
+                # ၂။ Live Update လုပ်ခြင်း
+                live_payload = {
                     "live_set": d2["live_set"],
                     "live_value": d2["live_value"],
                     "main_result": d2["main_result"],
                     "market_status": d2["market_status"],
-                    "update_time": d2["update_time"],
-                    "date": today_date
-                })
-
-                # ၂။ 2dhistory ထဲကို အချိန်အလိုက် ဒေတာကူးယူမယ်
-                # live_2d ထဲက data ကို အရင်ဖတ်မယ် (manual ရိုက်ထားတာ သိချင်လို့)
-                live_ref = db.reference('live_2d').get()
-                history_ref = db.reference(f'2dhistory/{today_date}')
-
-                # --- Morning (9:30 AM) ---
-                if current_time == "09:30":
-                    morning_930 = live_ref.get('morning', {}).get('9:30AM', {})
-                    history_ref.child("9:30AM").update({
-                        "modern": morning_930.get('modern', ""),
-                        "internet": morning_930.get('internet', "")
+                    "update_time": d2["update_time"]
+                }
+                
+                # မနက်ပိုင်း Live (9:30 AM to 12:05 PM)
+                if "09:30" <= current_time <= "12:05":
+                    db.reference('live_2d/morning/12:01PM').update({
+                        "set": d2["live_set"], "value": d2["live_value"], "result": d2["main_result"]
+                    })
+                
+                # ညနေပိုင်း Live (02:00 PM to 04:35 PM)
+                elif "14:00" <= current_time <= "16:35":
+                    db.reference('live_2d/evening/4:30PM').update({
+                        "set": d2["live_set"], "value": d2["live_value"], "result": d2["main_result"]
                     })
 
-                # --- Morning (12:01 PM) ---
-                elif current_time == "12:01":
-                    history_ref.child("12:01PM").update({
-                        "set": d2["live_set"],
-                        "value": d2["live_value"],
-                        "result": d2["main_result"]
-                    })
-
-                # --- Evening (2:00 PM) ---
-                elif current_time == "14:00":
-                    evening_200 = live_ref.get('evening', {}).get('2:00PM', {})
-                    history_ref.child("2:00PM").update({
-                        "modern": evening_200.get('modern', ""),
-                        "internet": evening_200.get('internet', "")
-                    })
-
-                # --- Evening (4:30 PM) ---
-                elif current_time == "16:30":
-                    history_ref.child("4:30PM").update({
-                        "set": d2["live_set"],
-                        "value": d2["live_value"],
-                        "result": d2["main_result"]
-                    })
-
-                print(f">>> Sync: {d2['update_time']} | 2D: {d2['main_result']}")
+                db.reference('live_2d').update(live_payload)
+                print(f">>> Log: {d2['update_time']} | 2D: {d2['main_result']}")
 
             except Exception as e:
-                print(f">>> FB Sync Error: {e}")
+                print(f">>> FB Error: {e}")
         
         time.sleep(5)
 
@@ -129,9 +143,8 @@ if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
 
 @app.route('/')
-def home(): return "Scraper v26 Running - All Sync Logic Added", 200
+def home(): return "Scraper v27 Running - Holiday & Reset Logic Active", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-    
