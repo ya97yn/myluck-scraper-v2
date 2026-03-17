@@ -123,7 +123,7 @@ def scraper_loop():
             except Exception as e:
                 print(f">>> FB Sync Error: {e}")
         
-        time.sleep(30)
+        time.sleep(5)
 
 if initialize_firebase():
     threading.Thread(target=scraper_loop, daemon=True).start()
