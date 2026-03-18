@@ -55,7 +55,7 @@ def get_live_data():
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
     try:
-        res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=15)
+        res_2d = requests.get("https://www.set.or.th/th/home", headers=headers, timeout=7)
         soup_2d = BeautifulSoup(res_2d.text, 'html.parser')
         
         status_parent = soup_2d.find("div", class_="text-black")
@@ -119,8 +119,8 @@ def scraper_loop():
                     "update_time": d2["update_time"]
                 }
                 
-                # မနက်ပိုင်း Live (9:30 AM to 12:05 PM)
-                if "09:30" <= current_time <= "12:05":
+                # မနက်ပိုင်း Live (9:30 AM to 12:01:15 PM)
+                if "09:30" <= current_time <= "12:01:15PM":
                     db.reference('live_2d/morning/12:01PM').update({
                         "set": d2["live_set"], "value": d2["live_value"], "result": d2["main_result"]
                     })
