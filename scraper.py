@@ -123,7 +123,7 @@ def scraper_loop():
                 d2 = get_live_data()
                 if d2: # ဖွင့်ရက်နှင့် သတ်မှတ်ချိန်အတွင်းမှသာ Update လုပ်မည်
                     # Morning Update
-                    if 34200 <= current_time_val <= 43275:
+                    if 34200 <= current_time_val <= 43265:
                         db.reference('live_2d/morning/12:01PM').update({
                             "set": d2["live_set"], "value": d2["live_value"], "result": d2["main_result"]
                         })
